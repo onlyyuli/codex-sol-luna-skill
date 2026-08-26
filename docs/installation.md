@@ -7,6 +7,10 @@
 - `curl` on macOS/Linux or PowerShell on Windows for one-line installation.
 - Access to `gpt-5.6-luna` for real Luna execution.
 
+Release-gate model smoke tests should use the current stable standalone Codex CLI. The installer
+accepts `--codex-bin /absolute/path/to/codex`, or the equivalent `SOL_LUNA_CODEX_BIN` environment
+variable, when a desktop-bundled pre-release appears first on `PATH`.
+
 ## Managed installation
 
 The release installer adds the pinned GitHub repository as `codex-sol-luna`, installs `sol-luna`, installs namespaced reader/worker Agent files, creates routing settings, and records checksums for safe upgrades and removal.

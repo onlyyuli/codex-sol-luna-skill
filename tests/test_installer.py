@@ -13,6 +13,15 @@ from installer import sol_luna_installer as installer
 
 
 class InstallerTests(unittest.TestCase):
+    def test_codex_release_channel_distinguishes_prerelease(self) -> None:
+        self.assertEqual(
+            installer.codex_release_channel("codex-cli 0.149.1"),
+            ("ok", "stable CLI detected (0.149.1)"),
+        )
+        status, detail = installer.codex_release_channel("codex-cli 0.149.0-alpha.4.3")
+        self.assertEqual(status, "warning")
+        self.assertIn("pre-release", detail)
+
     def test_check_payload_includes_only_real_evidence_path(self) -> None:
         self.assertNotIn(
             "evidence_path",
@@ -463,6 +472,126 @@ bounded worker
         self.assertIn(installer.sha256_bytes(manifest_bytes), checksums)
         self.assertEqual(manifest["artifacts"]["events.jsonl"]["sha256"], installer.sha256_bytes(events_bytes))
 
+    def test_smoke_models_uses_new_linked_rollouts_when_cli_jsonl_omits_child_metadata(self) -> None:
+        marker = "LUNA_SMOKE_OK_TEST"
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = Path(directory)
+            sessions = codex_home / "sessions/2026/08/27"
+
+            def fake_run(command, **kwargs):
+                if command[1:] == ["--version"]:
+                    return subprocess.CompletedProcess(
+                        args=command, returncode=0, stdout="codex-cli test\n", stderr=""
+                    )
+                if command[1:] == ["login", "status"]:
+                    return subprocess.CompletedProcess(
+                        args=command, returncode=0, stdout="Logged in\n", stderr=""
+                    )
+                sessions.mkdir(parents=True)
+                parent = sessions / "rollout-parent.jsonl"
+                child = sessions / "rollout-child.jsonl"
+                parent.write_text(
+                    "\n".join(
+                        [
+                            json.dumps(
+                                {"type": "session_meta", "payload": {"id": "parent-1"}}
+                            ),
+                            json.dumps(
+                                {
+                                    "type": "event_msg",
+                                    "payload": {
+                                        "type": "item_completed",
+                                        "item": {
+                                            "type": "SubAgentActivity",
+                                            "kind": "started",
+                                            "agent_thread_id": "child-1",
+                                        },
+                                    },
+                                }
+                            ),
+                            json.dumps(
+                                {
+                                    "type": "event_msg",
+                                    "payload": {
+                                        "type": "item_completed",
+                                        "item": {
+                                            "type": "SubAgentActivity",
+                                            "kind": "completed",
+                                            "agent_thread_id": "child-1",
+                                        },
+                                    },
+                                }
+                            ),
+                        ]
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                child.write_text(
+                    "\n".join(
+                        [
+                            json.dumps(
+                                {
+                                    "type": "session_meta",
+                                    "payload": {
+                                        "id": "child-1",
+                                        "parent_thread_id": "parent-1",
+                                    },
+                                }
+                            ),
+                            json.dumps(
+                                {
+                                    "type": "turn_context",
+                                    "payload": {
+                                        "model": "gpt-5.6-luna",
+                                        "collaboration_mode": {
+                                            "settings": {"reasoning_effort": "max"}
+                                        },
+                                    },
+                                }
+                            ),
+                            json.dumps(
+                                {
+                                    "type": "response_item",
+                                    "payload": {
+                                        "type": "message",
+                                        "role": "assistant",
+                                        "content": [{"type": "output_text", "text": marker}],
+                                    },
+                                }
+                            ),
+                            json.dumps(
+                                {"type": "event_msg", "payload": {"type": "task_complete"}}
+                            ),
+                        ]
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                stdout = (
+                    '{"type":"thread.started","thread_id":"parent-1"}\n'
+                    '{"type":"item.completed","item":{"type":"collab_tool_call",'
+                    '"receiver_thread_ids":[],"agents_states":{}}}\n'
+                )
+                return subprocess.CompletedProcess(
+                    args=command, returncode=0, stdout=stdout, stderr=""
+                )
+
+            with mock.patch.object(installer, "run_command", side_effect=fake_run), mock.patch.object(
+                installer, "make_smoke_marker", return_value=marker
+            ):
+                check = installer.smoke_models("codex", codex_home, Path.cwd())
+            bundle = Path(check.evidence_path)
+            manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(check.status, "ok")
+        self.assertEqual(manifest["verification"]["child_thread_ids"], ["child-1"])
+        self.assertEqual(
+            manifest["verification"]["verification_sources"], ["persisted_rollouts"]
+        )
+        self.assertIn("parent-rollout.jsonl", manifest["artifacts"])
+        self.assertIn("child-rollout-child-1.jsonl", manifest["artifacts"])
+
     def test_smoke_activity_rejects_ambiguous_effective_metadata(self) -> None:
         marker = "LUNA_SMOKE_OK_TEST"
         stdout = (
@@ -502,6 +631,14 @@ bounded worker
         command = run.call_args_list[2].args[0]
         self.assertIn("multi_agent", command)
         self.assertIn("agents.enabled=true", command)
+        self.assertIn("--strict-config", command)
+        self.assertNotIn("--ephemeral", command)
+        self.assertNotIn("model_providers.openai.supports_websockets=false", command)
+        self.assertIn('model_provider="sol_luna_smoke_http"', command)
+        provider_config = next(item for item in command if item.startswith("model_providers="))
+        self.assertIn("sol_luna_smoke_http", provider_config)
+        self.assertIn("supports_websockets=false", provider_config)
+        self.assertIn("requires_openai_auth=true", provider_config)
         prompt = command[-1]
         self.assertIn("functions.collaboration.spawn_agent", prompt)
         self.assertIn("task_name luna_smoke", prompt)

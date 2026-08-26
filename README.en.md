@@ -54,7 +54,12 @@ The Codex CLI maintains the Marketplace and Plugin namespaces in its own `config
 ./installer/install.sh uninstall
 ```
 
-The default doctor is non-billable. `--smoke-models` makes one real, potentially billable subagent request and automatically saves raw JSONL, child ID, model and effort metadata, Codex version, UTC timestamps, and SHA-256 values under `${CODEX_HOME}/sol-luna/evidence/`. It passes only when the same completed child proves Luna, Max, and the unique marker. See [runtime evidence](docs/evidence.md). Uninstall removes only unchanged managed files, preserves user modifications, and leaves evidence bundles as user audit data.
+The default doctor is non-billable. `--smoke-models` makes one real, potentially billable subagent request and automatically saves CLI JSONL, linked parent/child rollouts, child ID, model and effort metadata, Codex version, UTC timestamps, and SHA-256 values under `${CODEX_HOME}/sol-luna/evidence/`. It passes only when the same newly created, completed child proves Luna, Max, and the child-linked marker. See [runtime evidence](docs/evidence.md). Uninstall removes only unchanged managed files, preserves user modifications, and leaves evidence bundles as user audit data.
+
+Run release verification with the current stable standalone CLI. If `codex` resolves to a
+pre-release bundled with the desktop app, select the stable executable with
+`--codex-bin /absolute/path/to/codex` or `SOL_LUNA_CODEX_BIN`. The smoke process forces HTTPS
+without changing the base `config.toml`.
 
 See [installation](docs/installation.md), [configuration](docs/configuration.md), and [troubleshooting](docs/troubleshooting.md) for details.
 

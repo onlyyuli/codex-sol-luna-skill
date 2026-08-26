@@ -98,7 +98,11 @@ Codex CLI 会在自己的 `config.toml` 中维护该 Marketplace 和 Plugin 的�
 ./installer/install.sh uninstall
 ```
 
-`doctor` 默认不调用模型。`--smoke-models` 会执行一次真实、可能计费的最小子 Agent 测试，并把原始 JSONL、子线程 ID、模型与推理档位、Codex 版本、UTC 时间戳及 SHA-256 校验值自动保存到 `${CODEX_HOME}/sol-luna/evidence/`。只有同一个已完成子线程同时证明 Luna、Max 和唯一校验标记时才通过；详见 [运行证据](docs/evidence.md)。
+`doctor` 默认不调用模型。`--smoke-models` 会执行一次真实、可能计费的最小子 Agent 测试，并把 CLI JSONL、关联的父/子 rollout、子线程 ID、模型与推理档位、Codex 版本、UTC 时间戳及 SHA-256 校验值自动保存到 `${CODEX_HOME}/sol-luna/evidence/`。只有本次新建且完成的同一个子线程同时证明 Luna、Max 和子线程校验标记时才通过；详见 [运行证据](docs/evidence.md)。
+
+发布验证应使用官方当前稳定 CLI。若 `codex` 实际指向 Desktop 内置的预发布版本，可用
+`--codex-bin /absolute/path/to/codex` 或 `SOL_LUNA_CODEX_BIN` 显式选择稳定 CLI；smoke
+会在单次进程内直接使用 HTTPS，并且不会修改基础 `config.toml`。
 
 卸载只删除安装状态中登记且校验和未变化的文件；用户修改过的 settings、Agent 或 Profile 会被保留并明确报告。
 

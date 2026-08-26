@@ -8,11 +8,30 @@
 
 It checks CLI capabilities, Marketplace and Plugin state, Agent schemas, settings, managed-file checksums, a global Luna main-model pin, disabled subagents, and a current-project model override. It does not call a model.
 
-Use `doctor --smoke-models` only when one real, potentially billable test is acceptable. A successful textual response is not enough. The doctor requires exactly one non-empty child thread ID, a unique marker linked to that child, child completion, Luna model metadata, and Max-effort metadata; missing evidence makes the command fail.
+Use `doctor --smoke-models` only when one real, potentially billable test is acceptable. A successful textual response is not enough. The doctor requires exactly one newly created non-empty child thread ID, a marker linked to that child, child completion, Luna model metadata, and Max-effort metadata; missing evidence makes the command fail.
 
 Every attempt writes `${CODEX_HOME}/sol-luna/evidence/smoke-*/events.jsonl`, `manifest.json`, and `SHA256SUMS`, including failures and timeouts. The human-readable output prints the bundle path, while `--json` exposes `checks[].evidence_path`. See [Luna Max smoke evidence](evidence.md) for the verification levels, integrity check, privacy warning, and retention behavior.
 
 The smoke test uses the login associated with the selected `CODEX_HOME`. A disposable home normally has no login, so run the non-billable installation tests there and run the model smoke from an installed, authenticated home. If it times out, check `codex doctor --json` for provider and WebSocket reachability before changing the workflow configuration.
+
+The smoke command disables unrelated plugins and keeps the parent/child sessions inspectable. For
+that process only, it selects a temporary `sol_luna_smoke_http` provider that uses the normal Codex
+ChatGPT endpoint and login with WebSockets disabled. It never overrides the reserved
+`model_providers.openai` entry and does not modify the user's `config.toml`. The run may add
+inspectable parent/child entries to local Codex history.
+
+If `doctor` reports a pre-release executable (for example, a CLI bundled inside a desktop app),
+install the current stable CLI and select it explicitly:
+
+```sh
+npm install -g @openai/codex@latest
+./installer/install.sh doctor --codex-bin "$(command -v codex)" --smoke-models
+```
+
+You can also set `SOL_LUNA_CODEX_BIN` to an absolute executable path. Explicit selection prevents
+an older bundled CLI earlier on `PATH` from silently handling the release-gate smoke. Always use
+the current version shown in the official Codex changelog rather than copying the example version
+forever.
 
 Codex multi-agent tool surfaces are capability-dependent. Some releases may hide per-child
 `model`/`reasoning_effort` fields or a custom-agent selector even when `multi_agent` itself is

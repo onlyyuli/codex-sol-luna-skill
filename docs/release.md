@@ -1,7 +1,7 @@
 # Release process
 
 1. Run repository validation, unit tests, fixture tests, and real isolated installation.
-2. Run `doctor --smoke-models` once from the installed plugin, require `luna_max_verified`, verify `SHA256SUMS`, and retain the complete evidence bundle.
+2. Use the current stable standalone Codex CLI (not a bundled pre-release), selecting it with `--codex-bin` when necessary. Run `doctor --smoke-models` once from the installed plugin, require `luna_max_verified`, verify `SHA256SUMS`, and retain the complete evidence bundle.
 3. Run or explicitly defer the billable benchmark matrix; do not claim performance without results.
 4. Tag `v0.1.0-rc.1` for three-platform installation validation.
 5. Promote to `v0.1.0` only after the release gates in `docs/benchmark.md` pass.

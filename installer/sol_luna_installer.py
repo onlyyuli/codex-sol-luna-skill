@@ -37,6 +37,7 @@ MAX_AGENTS = 8
 SMOKE_MAIN_MODEL = "gpt-5.6-sol"
 SMOKE_CHILD_MODEL = "gpt-5.6-luna"
 SMOKE_CHILD_REASONING_EFFORT = "max"
+SMOKE_HTTP_PROVIDER = "sol_luna_smoke_http"
 SMOKE_EVIDENCE_SCHEMA_VERSION = 1
 
 RESOURCE_TARGETS = (
@@ -171,11 +172,25 @@ def command_json(command: list[str], codex_home: Path) -> dict[str, Any]:
     return value
 
 
-def codex_path() -> str:
-    executable = shutil.which("codex")
+def codex_path(explicit: Optional[str] = None) -> str:
+    requested = explicit or "codex"
+    expanded = str(Path(requested).expanduser())
+    executable = shutil.which(expanded)
     if not executable:
+        if explicit:
+            raise InstallerError(f"Codex CLI was not found or is not executable: {explicit}")
         raise InstallerError("Codex CLI was not found on PATH.")
-    return executable
+    return str(Path(executable).resolve())
+
+
+def codex_release_channel(version_text: str) -> tuple[str, str]:
+    match = re.search(r"\b(\d+\.\d+\.\d+)(?:-([0-9A-Za-z.-]+))?\b", version_text)
+    if not match:
+        return "warning", "could not determine the CLI release channel"
+    prerelease = match.group(2)
+    if prerelease:
+        return "warning", f"pre-release CLI detected ({match.group(1)}-{prerelease})"
+    return "ok", f"stable CLI detected ({match.group(1)})"
 
 
 def state_path(codex_home: Path) -> Path:
@@ -747,7 +762,7 @@ def utc_now_iso() -> str:
 
 
 def make_smoke_marker() -> str:
-    return f"LUNA_SMOKE_OK_{secrets.token_hex(8)}"
+    return "LUNA_SMOKE_OK"
 
 
 def normalize_process_output(value: Any) -> str:
@@ -774,6 +789,293 @@ def parse_jsonl_events(stdout: str) -> tuple[list[dict[str, Any]], int]:
         else:
             invalid_lines += 1
     return events, invalid_lines
+
+
+def smoke_rollout_snapshot(codex_home: Path) -> set[Path]:
+    sessions = codex_home / "sessions"
+    if not sessions.is_dir():
+        return set()
+    paths: set[Path] = set()
+    try:
+        candidates = sessions.rglob("*.jsonl")
+        for path in candidates:
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                paths.add(path.resolve())
+            except OSError:
+                continue
+    except OSError:
+        return paths
+    return paths
+
+
+def rollout_session_metadata(path: Path) -> dict[str, Any]:
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            first_line = handle.readline()
+        event = json.loads(first_line)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if event.get("type") != "session_meta" or not isinstance(event.get("payload"), dict):
+        return {}
+    return event["payload"]
+
+
+def smoke_parent_thread_id(stdout: str) -> Optional[str]:
+    events, _ = parse_jsonl_events(stdout)
+    for event in events:
+        if event.get("type") != "thread.started":
+            continue
+        value = event.get("thread_id")
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def discover_smoke_rollouts(
+    codex_home: Path,
+    before: set[Path],
+    parent_thread_id: Optional[str],
+) -> tuple[Optional[Path], list[Path]]:
+    if not parent_thread_id:
+        return None, []
+    new_paths = smoke_rollout_snapshot(codex_home) - before
+    parent: Optional[Path] = None
+    children: list[Path] = []
+    for path in sorted(new_paths):
+        metadata = rollout_session_metadata(path)
+        thread_id = metadata.get("id") or metadata.get("session_id")
+        if thread_id == parent_thread_id:
+            parent = path
+        elif metadata.get("parent_thread_id") == parent_thread_id:
+            children.append(path)
+    return parent, children
+
+
+def read_smoke_rollout_artifacts(
+    parent_path: Optional[Path], child_paths: list[Path]
+) -> dict[str, bytes]:
+    artifacts: dict[str, bytes] = {}
+    candidates: list[tuple[str, Path]] = []
+    if parent_path is not None:
+        candidates.append(("parent-rollout.jsonl", parent_path))
+    for index, path in enumerate(child_paths, start=1):
+        metadata = rollout_session_metadata(path)
+        child_id = metadata.get("id") or metadata.get("session_id")
+        safe_id = re.sub(r"[^A-Za-z0-9-]", "-", str(child_id or index))
+        candidates.append((f"child-rollout-{safe_id}.jsonl", path))
+    for name, path in candidates:
+        try:
+            artifacts[name] = path.read_bytes()
+        except OSError:
+            continue
+    return artifacts
+
+
+def _rollout_texts(events: list[dict[str, Any]]) -> list[str]:
+    texts: list[str] = []
+    for event in events:
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        if (
+            event.get("type") == "response_item"
+            and payload.get("type") == "message"
+            and payload.get("role") == "assistant"
+        ):
+            content = payload.get("content")
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and isinstance(item.get("text"), str):
+                        texts.append(item["text"])
+    return texts
+
+
+def assess_smoke_rollouts(
+    parent_path: Optional[Path],
+    child_paths: list[Path],
+    marker: str,
+) -> dict[str, Any]:
+    empty = {
+        "child_thread_ids": [],
+        "child_count": 0,
+        "collaboration_event_count": 0,
+        "observed_models": [],
+        "observed_reasoning_efforts": [],
+        "marker_observed_anywhere": False,
+        "marker_proven_for_child": False,
+        "child_completion_proven": False,
+        "child_states": [],
+        "activity_errors": [],
+        "parsed_event_count": 0,
+        "invalid_jsonl_line_count": 0,
+    }
+    if parent_path is None or not parent_path.is_file():
+        return empty
+    try:
+        parent_stdout = parent_path.read_text(encoding="utf-8")
+    except OSError:
+        return empty
+    parent_events, invalid_lines = parse_jsonl_events(parent_stdout)
+    started: set[str] = set()
+    completed: set[str] = set()
+    errors: list[str] = []
+    collaboration_events = 0
+    for event in parent_events:
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("type") == "item_completed" and isinstance(payload.get("item"), dict):
+            item = payload["item"]
+            if item.get("type") == "SubAgentActivity":
+                child_id = item.get("agent_thread_id")
+                kind = item.get("kind")
+                if isinstance(child_id, str) and child_id:
+                    collaboration_events += 1
+                    if kind == "started":
+                        started.add(child_id)
+                    elif kind == "completed":
+                        completed.add(child_id)
+        if payload.get("type") == "error" and isinstance(payload.get("message"), str):
+            errors.append(payload["message"])
+
+    child_records: dict[str, dict[str, Any]] = {}
+    event_count = len(parent_events)
+    for path in child_paths:
+        metadata = rollout_session_metadata(path)
+        child_id = metadata.get("id") or metadata.get("session_id")
+        if not isinstance(child_id, str) or not child_id:
+            continue
+        try:
+            child_stdout = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        child_events, child_invalid = parse_jsonl_events(child_stdout)
+        invalid_lines += child_invalid
+        event_count += len(child_events)
+        model_values: set[str] = set()
+        effort_values: set[str] = set()
+        task_complete = False
+        for event in child_events:
+            payload = event.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            if event.get("type") == "turn_context":
+                model = payload.get("model")
+                if isinstance(model, str):
+                    model_values.add(model)
+                collaboration = payload.get("collaboration_mode")
+                if isinstance(collaboration, dict):
+                    settings = collaboration.get("settings")
+                    if isinstance(settings, dict):
+                        effort = settings.get("reasoning_effort")
+                        if isinstance(effort, str):
+                            effort_values.add(effort)
+            if event.get("type") == "event_msg" and payload.get("type") == "task_complete":
+                task_complete = True
+            if payload.get("type") == "error" and isinstance(payload.get("message"), str):
+                errors.append(payload["message"])
+        child_records[child_id] = {
+            "models": model_values,
+            "efforts": effort_values,
+            "texts": _rollout_texts(child_events),
+            "task_complete": task_complete,
+        }
+
+    linked_ids = set(child_records).intersection(started)
+    models: set[str] = set()
+    efforts: set[str] = set()
+    marker_ids: set[str] = set()
+    completed_ids: set[str] = set()
+    for child_id in linked_ids:
+        record = child_records[child_id]
+        models.update(record["models"])
+        efforts.update(record["efforts"])
+        if any(marker in text for text in record["texts"]):
+            marker_ids.add(child_id)
+        if child_id in completed or record["task_complete"]:
+            completed_ids.add(child_id)
+    marker_proven = len(linked_ids) == 1 and marker_ids == linked_ids
+    completion_proven = marker_proven and completed_ids == linked_ids
+    return {
+        "child_thread_ids": sorted(linked_ids),
+        "child_count": len(linked_ids),
+        "collaboration_event_count": collaboration_events,
+        "observed_models": sorted(models),
+        "observed_reasoning_efforts": sorted(efforts),
+        "marker_observed_anywhere": bool(marker_ids),
+        "marker_proven_for_child": marker_proven,
+        "child_completion_proven": completion_proven,
+        "child_states": ["completed"] if completion_proven else [],
+        "activity_errors": errors[-5:],
+        "parsed_event_count": event_count,
+        "invalid_jsonl_line_count": invalid_lines,
+    }
+
+
+def merge_smoke_assessments(
+    activity: dict[str, Any], rollout: dict[str, Any]
+) -> dict[str, Any]:
+    child_ids = set(activity["child_thread_ids"]) | set(rollout["child_thread_ids"])
+    models = set(activity["observed_models"]) | set(rollout["observed_models"])
+    efforts = set(activity["observed_reasoning_efforts"]) | set(
+        rollout["observed_reasoning_efforts"]
+    )
+    marker_proven = bool(
+        activity["marker_proven_for_child"] or rollout["marker_proven_for_child"]
+    )
+    completion_proven = marker_proven and bool(
+        activity["child_completion_proven"] or rollout["child_completion_proven"]
+    )
+    luna_model_proven = len(child_ids) == 1 and models == {SMOKE_CHILD_MODEL}
+    max_effort_proven = len(child_ids) == 1 and efforts == {
+        SMOKE_CHILD_REASONING_EFFORT
+    }
+    verification_level = "requested_only"
+    if len(child_ids) == 1 and marker_proven and completion_proven and luna_model_proven:
+        verification_level = "luna_verified"
+        if max_effort_proven:
+            verification_level = "luna_max_verified"
+    sources = []
+    if activity["child_thread_ids"]:
+        sources.append("cli_jsonl")
+    if rollout["child_thread_ids"]:
+        sources.append("persisted_rollouts")
+    return {
+        "verification_level": verification_level,
+        "verification_sources": sources,
+        "passed": verification_level == "luna_max_verified",
+        "child_thread_ids": sorted(child_ids),
+        "child_count": len(child_ids),
+        "collaboration_event_count": (
+            activity["collaboration_event_count"]
+            + rollout["collaboration_event_count"]
+        ),
+        "observed_models": sorted(models),
+        "observed_reasoning_efforts": sorted(efforts),
+        "luna_model_proven": luna_model_proven,
+        "max_effort_proven": max_effort_proven,
+        "marker_observed_anywhere": bool(
+            activity["marker_observed_anywhere"]
+            or rollout["marker_observed_anywhere"]
+        ),
+        "marker_proven_for_child": marker_proven,
+        "child_completion_proven": completion_proven,
+        "child_states": sorted(
+            set(activity["child_states"]) | set(rollout["child_states"])
+        ),
+        "activity_errors": (
+            list(activity["activity_errors"]) + list(rollout["activity_errors"])
+        )[-5:],
+        "parsed_event_count": (
+            activity["parsed_event_count"] + rollout["parsed_event_count"]
+        ),
+        "invalid_jsonl_line_count": (
+            activity["invalid_jsonl_line_count"]
+            + rollout["invalid_jsonl_line_count"]
+        ),
+    }
 
 
 def nested_text_values(value: Any, accepted_keys: set[str], inside_result: bool = False) -> list[str]:
@@ -944,6 +1246,7 @@ def write_smoke_evidence_bundle(
     return_code: Optional[int],
     timed_out: bool,
     error_summary: str,
+    rollout_artifacts: Optional[dict[str, bytes]] = None,
 ) -> Path:
     evidence_root = codex_home / "sol-luna" / "evidence"
     require_managed_path(evidence_root, codex_home)
@@ -958,9 +1261,15 @@ def write_smoke_evidence_bundle(
     require_managed_path(bundle, codex_home)
     bundle.mkdir(mode=0o700)
 
+    rollout_artifacts = rollout_artifacts or {}
     events_path = bundle / "events.jsonl"
     events_data = stdout.encode("utf-8")
     atomic_write(events_path, events_data)
+    artifact_payloads = {"events.jsonl": events_data, **rollout_artifacts}
+    for name, data in rollout_artifacts.items():
+        if Path(name).name != name or not name.endswith(".jsonl"):
+            raise InstallerError(f"Invalid smoke rollout artifact name: {name}")
+        atomic_write(bundle / name, data)
     manifest = {
         "schema_version": SMOKE_EVIDENCE_SCHEMA_VERSION,
         "kind": "codex-sol-luna-model-smoke",
@@ -985,10 +1294,8 @@ def write_smoke_evidence_bundle(
         },
         "verification": assessment,
         "artifacts": {
-            "events.jsonl": {
-                "bytes": len(events_data),
-                "sha256": sha256_bytes(events_data),
-            }
+            name: {"bytes": len(data), "sha256": sha256_bytes(data)}
+            for name, data in sorted(artifact_payloads.items())
         },
         "sharing_warning": (
             "Review events.jsonl before sharing; runtime output can contain local paths or "
@@ -1000,12 +1307,18 @@ def write_smoke_evidence_bundle(
         json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     ).encode("utf-8")
     atomic_write(manifest_path, manifest_data)
-    checksums = (
-        f"{sha256_bytes(events_data)}  events.jsonl\n"
-        f"{sha256_bytes(manifest_data)}  manifest.json\n"
-    ).encode("utf-8")
+    checksum_lines = [
+        f"{sha256_bytes(data)}  {name}\n"
+        for name, data in sorted(artifact_payloads.items())
+    ]
+    checksum_lines.append(f"{sha256_bytes(manifest_data)}  manifest.json\n")
+    checksums = "".join(checksum_lines).encode("utf-8")
     atomic_write(bundle / "SHA256SUMS", checksums)
-    for path in (events_path, manifest_path, bundle / "SHA256SUMS"):
+    for path in (
+        *(bundle / name for name in artifact_payloads),
+        manifest_path,
+        bundle / "SHA256SUMS",
+    ):
         try:
             path.chmod(0o600)
         except OSError:
@@ -1027,6 +1340,7 @@ def smoke_check_with_evidence(
     return_code: Optional[int],
     timed_out: bool,
     error_summary: str = "",
+    rollout_artifacts: Optional[dict[str, bytes]] = None,
 ) -> Check:
     try:
         bundle = write_smoke_evidence_bundle(
@@ -1041,6 +1355,7 @@ def smoke_check_with_evidence(
             return_code=return_code,
             timed_out=timed_out,
             error_summary=error_summary,
+            rollout_artifacts=rollout_artifacts,
         )
     except (InstallerError, OSError) as exc:
         return Check(
@@ -1104,6 +1419,7 @@ def inspect_cached_luna_model(codex_home: Path) -> Check:
 def smoke_models(codex: str, codex_home: Path, cwd: Path) -> Check:
     started_at = utc_now_iso()
     marker = make_smoke_marker()
+    task_name = f"luna_smoke_{secrets.token_hex(4)}"
     try:
         version_result = run_command(
             [codex, "--version"],
@@ -1163,10 +1479,11 @@ def smoke_models(codex: str, codex_home: Path, cwd: Path) -> Check:
         )
     prompt = (
         "Your first action must be one direct call to functions.collaboration.spawn_agent. "
-        "Use task_name luna_smoke, fork_turns none, "
+        f"Use task_name {task_name}, fork_turns none, "
         f"model {SMOKE_CHILD_MODEL}, reasoning_effort {SMOKE_CHILD_REASONING_EFFORT}, and a "
-        f"message asking the child to return only {marker} without reading or writing files, "
-        "calling tools, or delegating. "
+        "message argument containing exactly this instruction: "
+        f"Return exactly and only the full token {marker}, preserving every suffix character; "
+        "do not read or write files, call tools, or delegate. "
         "Do not call wait_agent unless spawn_agent returns a non-empty child thread ID. If the "
         "tool is unavailable, the call fails, or no child ID is returned, return only "
         "SUBAGENT_SMOKE_FAILED. If the child starts, wait for that exact child and then return "
@@ -1178,12 +1495,24 @@ def smoke_models(codex: str, codex_home: Path, cwd: Path) -> Check:
         "exec",
         "--enable",
         "multi_agent",
+        "--disable",
+        "plugins",
+        "--strict-config",
         "--json",
-        "--ephemeral",
         "--sandbox",
         "read-only",
         "--model",
         SMOKE_MAIN_MODEL,
+        "--config",
+        f'model_provider="{SMOKE_HTTP_PROVIDER}"',
+        "--config",
+        (
+            "model_providers={sol_luna_smoke_http={"
+            'name="Sol Luna smoke HTTP",'
+            'base_url="https://chatgpt.com/backend-api/codex",'
+            'wire_api="responses",requires_openai_auth=true,'
+            "supports_websockets=false}}"
+        ),
         "--config",
         "agents.enabled=true",
         "--config",
@@ -1192,11 +1521,19 @@ def smoke_models(codex: str, codex_home: Path, cwd: Path) -> Check:
         f'agents.default_subagent_reasoning_effort="{SMOKE_CHILD_REASONING_EFFORT}"',
         prompt,
     ]
+    rollout_before = smoke_rollout_snapshot(codex_home)
     try:
         result = run_command(command, codex_home=codex_home, cwd=cwd, timeout=300, check=False)
     except subprocess.TimeoutExpired as exc:
         stdout = normalize_process_output(exc.stdout)
-        assessment = assess_smoke_activity(stdout, marker)
+        parent_rollout, child_rollouts = discover_smoke_rollouts(
+            codex_home, rollout_before, smoke_parent_thread_id(stdout)
+        )
+        assessment = merge_smoke_assessments(
+            assess_smoke_activity(stdout, marker),
+            assess_smoke_rollouts(parent_rollout, child_rollouts, marker),
+        )
+        rollout_artifacts = read_smoke_rollout_artifacts(parent_rollout, child_rollouts)
         return smoke_check_with_evidence(
             codex_home,
             status="error",
@@ -1210,9 +1547,17 @@ def smoke_models(codex: str, codex_home: Path, cwd: Path) -> Check:
             return_code=None,
             timed_out=True,
             error_summary=normalize_process_output(exc.stderr),
+            rollout_artifacts=rollout_artifacts,
         )
     stdout = result.stdout
-    assessment = assess_smoke_activity(stdout, marker)
+    parent_rollout, child_rollouts = discover_smoke_rollouts(
+        codex_home, rollout_before, smoke_parent_thread_id(stdout)
+    )
+    assessment = merge_smoke_assessments(
+        assess_smoke_activity(stdout, marker),
+        assess_smoke_rollouts(parent_rollout, child_rollouts, marker),
+    )
+    rollout_artifacts = read_smoke_rollout_artifacts(parent_rollout, child_rollouts)
     if result.returncode != 0:
         detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "unknown failure"
         return smoke_check_with_evidence(
@@ -1228,6 +1573,7 @@ def smoke_models(codex: str, codex_home: Path, cwd: Path) -> Check:
             return_code=result.returncode,
             timed_out=False,
             error_summary=detail,
+            rollout_artifacts=rollout_artifacts,
         )
     if assessment["child_count"] != 1:
         context = []
@@ -1253,6 +1599,7 @@ def smoke_models(codex: str, codex_home: Path, cwd: Path) -> Check:
             execution_status="completed",
             return_code=result.returncode,
             timed_out=False,
+            rollout_artifacts=rollout_artifacts,
         )
     if not assessment["marker_proven_for_child"]:
         marker_context = (
@@ -1265,7 +1612,7 @@ def smoke_models(codex: str, codex_home: Path, cwd: Path) -> Check:
             status="error",
             detail=(
                 "A child thread was observed, but its child-linked activity did not return the "
-                f"unique smoke marker.{marker_context}"
+                f"smoke marker.{marker_context}"
             ),
             stdout=stdout,
             marker=marker,
@@ -1275,6 +1622,7 @@ def smoke_models(codex: str, codex_home: Path, cwd: Path) -> Check:
             execution_status="completed",
             return_code=result.returncode,
             timed_out=False,
+            rollout_artifacts=rollout_artifacts,
         )
     if not assessment["child_completion_proven"]:
         return smoke_check_with_evidence(
@@ -1289,6 +1637,7 @@ def smoke_models(codex: str, codex_home: Path, cwd: Path) -> Check:
             execution_status="completed",
             return_code=result.returncode,
             timed_out=False,
+            rollout_artifacts=rollout_artifacts,
         )
     if not assessment["luna_model_proven"]:
         return smoke_check_with_evidence(
@@ -1306,6 +1655,7 @@ def smoke_models(codex: str, codex_home: Path, cwd: Path) -> Check:
             execution_status="completed",
             return_code=result.returncode,
             timed_out=False,
+            rollout_artifacts=rollout_artifacts,
         )
     if not assessment["max_effort_proven"]:
         return smoke_check_with_evidence(
@@ -1320,6 +1670,7 @@ def smoke_models(codex: str, codex_home: Path, cwd: Path) -> Check:
             execution_status="completed",
             return_code=result.returncode,
             timed_out=False,
+            rollout_artifacts=rollout_artifacts,
         )
     return smoke_check_with_evidence(
         codex_home,
@@ -1333,6 +1684,7 @@ def smoke_models(codex: str, codex_home: Path, cwd: Path) -> Check:
         execution_status="completed",
         return_code=result.returncode,
         timed_out=False,
+        rollout_artifacts=rollout_artifacts,
     )
 
 
@@ -1343,9 +1695,10 @@ def run_doctor(
     smoke: bool,
     repository: Optional[str],
     marketplace_source: Optional[str] = None,
+    codex_executable: Optional[str] = None,
 ) -> list[Check]:
     checks: list[Check] = []
-    codex = shutil.which("codex")
+    codex = codex_executable or shutil.which("codex")
     if not codex:
         return [Check("Codex CLI", "error", "codex is not available on PATH")]
     try:
@@ -1362,9 +1715,13 @@ def run_doctor(
         Check(
             "Codex CLI",
             "ok" if version.returncode == 0 else "error",
-            version.stdout.strip() or version.stderr.strip(),
+            f"{version.stdout.strip() or version.stderr.strip()} ({Path(codex).resolve()})",
         )
     )
+    channel_status, channel_detail = codex_release_channel(
+        version.stdout.strip() or version.stderr.strip()
+    )
+    checks.append(Check("Codex CLI release channel", channel_status, channel_detail))
     plugin_help = run_command([codex, "plugin", "--help"], codex_home=codex_home, check=False)
     checks.append(
         Check(
@@ -1527,7 +1884,7 @@ def install_or_upgrade(args: argparse.Namespace, reporter: Reporter, upgrade: bo
     repo_root = discover_repo_root(Path(__file__), args.repo_root)
     repository = resolve_repository(args.repository, repo_root)
     ref = resolve_ref(args.ref)
-    codex = codex_path()
+    codex = codex_path(getattr(args, "codex_bin", None))
     state = read_state(codex_home)
     previously_added = bool(state.get("marketplace_added", False))
 
@@ -1592,6 +1949,7 @@ def install_or_upgrade(args: argparse.Namespace, reporter: Reporter, upgrade: bo
         smoke=False,
         repository=repository,
         marketplace_source=str(repo_root) if args.local_marketplace and repo_root else repository,
+        codex_executable=codex,
     )
     failures = [check for check in checks if check.status == "error"]
     for check in checks:
@@ -1605,7 +1963,8 @@ def install_or_upgrade(args: argparse.Namespace, reporter: Reporter, upgrade: bo
 def uninstall(args: argparse.Namespace, reporter: Reporter) -> dict[str, Any]:
     codex_home = Path(args.codex_home).expanduser().resolve()
     state = read_state(codex_home)
-    codex = shutil.which("codex")
+    explicit_codex = getattr(args, "codex_bin", None)
+    codex = codex_path(explicit_codex) if explicit_codex else shutil.which("codex")
     plugin_pending = False
     marketplace_pending = False
     if codex:
@@ -1692,12 +2051,15 @@ def doctor_action(args: argparse.Namespace, reporter: Reporter) -> dict[str, Any
     if repository in {REPOSITORY_PLACEHOLDER, ""}:
         repository = None
     repo_root = discover_repo_root(Path(__file__), args.repo_root) if args.local_marketplace else None
+    explicit_codex = getattr(args, "codex_bin", None)
+    codex = codex_path(explicit_codex) if explicit_codex else None
     checks = run_doctor(
         codex_home,
         cwd=Path.cwd(),
         smoke=args.smoke_models,
         repository=repository,
         marketplace_source=str(repo_root) if repo_root else repository,
+        codex_executable=codex,
     )
     for check in checks:
         reporter.emit(check.status, f"{check.name}: {check.detail}")
@@ -1713,6 +2075,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("install", "upgrade", "uninstall", "doctor"))
     parser.add_argument("--codex-home", default=default_codex_home(), help="Codex state directory")
+    parser.add_argument(
+        "--codex-bin",
+        default=os.environ.get("SOL_LUNA_CODEX_BIN"),
+        help=(
+            "Codex CLI executable to use instead of the first codex on PATH "
+            "(or set SOL_LUNA_CODEX_BIN)"
+        ),
+    )
     parser.add_argument("--repo-root", help="Local source repository root for templates")
     parser.add_argument("--repository", help="GitHub repository as owner/name")
     parser.add_argument("--ref", help=f"Git ref (default: {DEFAULT_REF})")
