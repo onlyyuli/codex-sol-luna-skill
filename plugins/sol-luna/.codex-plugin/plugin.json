@@ -1,0 +1,28 @@
+{
+  "name": "sol-luna",
+  "version": "0.1.0",
+  "description": "Explicitly route bounded work from the current Codex main thread to GPT-5.6 Luna Max subagents.",
+  "author": {
+    "name": "onlyyuli",
+    "url": "https://github.com/onlyyuli"
+  },
+  "homepage": "https://github.com/onlyyuli/codex-sol-luna-workflow",
+  "repository": "https://github.com/onlyyuli/codex-sol-luna-workflow",
+  "license": "MIT",
+  "keywords": ["codex", "subagents", "orchestration", "sol", "luna"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Sol + Luna",
+    "shortDescription": "Delegate bounded work to Luna Max workers.",
+    "longDescription": "Keep the user-selected Codex model in the main thread while explicitly delegating independent, bounded work to GPT-5.6 Luna Max subagents.",
+    "developerName": "onlyyuli",
+    "category": "Developer Tools",
+    "capabilities": ["Multi-agent orchestration", "Read", "Write"],
+    "websiteURL": "https://github.com/onlyyuli/codex-sol-luna-workflow",
+    "defaultPrompt": [
+      "$sol-luna complete this task with adaptive Luna Max delegation.",
+      "$sol-luna use four Luna agents for read-only parallel analysis.",
+      "$sol-luna keep this task in the main thread without subagents."
+    ]
+  }
+}

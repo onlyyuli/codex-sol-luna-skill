@@ -1,0 +1,6 @@
+interface:
+  display_name: "Sol + Luna"
+  short_description: "Delegate bounded work to Luna Max workers"
+  default_prompt: "Use $sol-luna to complete this task with adaptive Luna Max delegation."
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,34 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate
+        run: |
+          python tools/sync_repository_metadata.py --repository "$GITHUB_REPOSITORY" --check
+          python tools/validate_repository.py
+          python -m unittest discover -s tests -p "test_*.py"
+      - name: Run benchmark fixture tests
+        working-directory: benchmarks/fixture
+        run: python -m unittest discover -s tests
+      - name: Build release assets
+        run: python tools/build_release.py --repository "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --verify-tag

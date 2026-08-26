@@ -1,0 +1,6 @@
+auto_min_agents = 2
+auto_max_agents = 4
+hard_max_agents = 8
+write_parallelism = "disjoint-only"
+strict_model = true
+announce_route = true

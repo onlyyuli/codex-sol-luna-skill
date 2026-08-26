@@ -1,0 +1,20 @@
+{
+  "name": "codex-sol-luna",
+  "interface": {
+    "displayName": "Codex Sol Luna"
+  },
+  "plugins": [
+    {
+      "name": "sol-luna",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sol-luna"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}
