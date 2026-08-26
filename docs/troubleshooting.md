@@ -8,7 +8,9 @@
 
 It checks CLI capabilities, Marketplace and Plugin state, Agent schemas, settings, managed-file checksums, a global Luna main-model pin, disabled subagents, and a current-project model override. It does not call a model.
 
-Use `doctor --smoke-models` only when one real, potentially billable test is acceptable. A successful textual response is not enough. The doctor requires exactly one non-empty child thread ID, the child marker, Luna model metadata, and Max-effort metadata; missing evidence makes the command fail.
+Use `doctor --smoke-models` only when one real, potentially billable test is acceptable. A successful textual response is not enough. The doctor requires exactly one non-empty child thread ID, a unique marker linked to that child, child completion, Luna model metadata, and Max-effort metadata; missing evidence makes the command fail.
+
+Every attempt writes `${CODEX_HOME}/sol-luna/evidence/smoke-*/events.jsonl`, `manifest.json`, and `SHA256SUMS`, including failures and timeouts. The human-readable output prints the bundle path, while `--json` exposes `checks[].evidence_path`. See [Luna Max smoke evidence](evidence.md) for the verification levels, integrity check, privacy warning, and retention behavior.
 
 The smoke test uses the login associated with the selected `CODEX_HOME`. A disposable home normally has no login, so run the non-billable installation tests there and run the model smoke from an installed, authenticated home. If it times out, check `codex doctor --json` for provider and WebSocket reachability before changing the workflow configuration.
 

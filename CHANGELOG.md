@@ -7,4 +7,5 @@ All notable changes follow Semantic Versioning.
 - Add the explicit-only Sol + Luna Codex Plugin and Marketplace.
 - Add Luna Max reader and worker contracts with bounded delegation.
 - Add managed cross-platform install, upgrade, doctor, and uninstall tooling.
+- Add strict Luna Max smoke verification with private JSONL evidence bundles and SHA-256 integrity records.
 - Add isolated installation tests and an opt-in 18-task benchmark harness.

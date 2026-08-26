@@ -13,6 +13,18 @@ from installer import sol_luna_installer as installer
 
 
 class InstallerTests(unittest.TestCase):
+    def test_check_payload_includes_only_real_evidence_path(self) -> None:
+        self.assertNotIn(
+            "evidence_path",
+            installer.check_payload(installer.Check("check", "ok", "detail")),
+        )
+        self.assertEqual(
+            installer.check_payload(
+                installer.Check("check", "ok", "detail", evidence_path="/evidence/run")
+            )["evidence_path"],
+            "/evidence/run",
+        )
+
     def test_repository_remote_parsing(self) -> None:
         expected = "owner/repository"
         self.assertEqual(installer.parse_repository_from_remote("https://github.com/owner/repository.git"), expected)
@@ -113,6 +125,26 @@ bounded worker
             self.assertEqual(result["preserved"], [str(modified)])
             residual = json.loads(installer.state_path(codex_home).read_text(encoding="utf-8"))
             self.assertEqual(list(residual["managed_files"]), [str(modified)])
+
+    def test_uninstall_preserves_smoke_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = Path(directory)
+            evidence = codex_home / "sol-luna/evidence/smoke-test/manifest.json"
+            evidence.parent.mkdir(parents=True)
+            evidence.write_text("{}\n", encoding="utf-8")
+            installer.write_state(
+                codex_home,
+                {
+                    "schema_version": 1,
+                    "marketplace_added": False,
+                    "managed_files": {},
+                },
+            )
+            args = Namespace(codex_home=str(codex_home))
+            with mock.patch("shutil.which", return_value=None):
+                result = installer.uninstall(args, installer.Reporter())
+            self.assertEqual(result["status"], "ok")
+            self.assertTrue(evidence.is_file())
 
     def test_uninstall_preserves_preexisting_identical_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -241,19 +273,38 @@ bounded worker
                 )
 
     def test_smoke_models_fails_fast_without_login(self) -> None:
-        result = subprocess.CompletedProcess(
+        version = subprocess.CompletedProcess(
+            args=["codex", "--version"],
+            returncode=0,
+            stdout="codex-cli test\n",
+            stderr="",
+        )
+        login = subprocess.CompletedProcess(
             args=["codex", "login", "status"],
             returncode=1,
             stdout="Not logged in\n",
             stderr="",
         )
-        with mock.patch.object(installer, "run_command", return_value=result) as run:
-            check = installer.smoke_models("codex", Path("/tmp/test-codex-home"), Path.cwd())
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            installer, "run_command", side_effect=[version, login]
+        ) as run, mock.patch.object(
+            installer, "make_smoke_marker", return_value="LUNA_SMOKE_OK_TEST"
+        ):
+            check = installer.smoke_models("codex", Path(directory), Path.cwd())
+            manifest = json.loads(
+                (Path(check.evidence_path) / "manifest.json").read_text(encoding="utf-8")
+            )
         self.assertEqual(check.status, "error")
         self.assertIn("not logged in", check.detail.lower())
-        run.assert_called_once()
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(manifest["execution"]["status"], "preflight_failed")
+        self.assertEqual(manifest["verification"]["verification_level"], "requested_only")
 
     def test_smoke_models_rejects_parent_only_success_marker(self) -> None:
+        marker = "LUNA_SMOKE_OK_TEST"
+        version = subprocess.CompletedProcess(
+            args=["codex", "--version"], returncode=0, stdout="codex-cli test\n", stderr=""
+        )
         login = subprocess.CompletedProcess(
             args=["codex", "login", "status"], returncode=0, stdout="Logged in\n", stderr=""
         )
@@ -262,14 +313,47 @@ bounded worker
             returncode=0,
             stdout=(
                 '{"type":"item.completed","item":{"type":"agent_message",'
-                '"text":"LUNA_SMOKE_OK"}}\n'
+                f'"text":"{marker}"}}}}\n'
             ),
             stderr="",
         )
-        with mock.patch.object(installer, "run_command", side_effect=[login, smoke]):
-            check = installer.smoke_models("codex", Path("/tmp/test-codex-home"), Path.cwd())
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            installer, "run_command", side_effect=[version, login, smoke]
+        ), mock.patch.object(installer, "make_smoke_marker", return_value=marker):
+            check = installer.smoke_models("codex", Path(directory), Path.cwd())
         self.assertEqual(check.status, "error")
         self.assertIn("0 child thread", check.detail)
+
+    def test_smoke_models_rejects_parent_marker_for_observed_child(self) -> None:
+        marker = "LUNA_SMOKE_OK_TEST"
+        version = subprocess.CompletedProcess(
+            args=["codex", "--version"], returncode=0, stdout="codex-cli test\n", stderr=""
+        )
+        login = subprocess.CompletedProcess(
+            args=["codex", "login", "status"], returncode=0, stdout="Logged in\n", stderr=""
+        )
+        smoke = subprocess.CompletedProcess(
+            args=["codex", "exec"],
+            returncode=0,
+            stdout=(
+                '{"type":"item.completed","item":{"type":"collab_tool_call",'
+                '"receiver_thread_ids":["child-1"],"model":"gpt-5.6-luna",'
+                '"reasoning_effort":"max","agents_states":{"child-1":"completed"}}}\n'
+                '{"type":"item.completed","item":{"type":"agent_message",'
+                f'"text":"{marker}"}}}}\n'
+            ),
+            stderr="",
+        )
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            installer, "run_command", side_effect=[version, login, smoke]
+        ), mock.patch.object(installer, "make_smoke_marker", return_value=marker):
+            check = installer.smoke_models("codex", Path(directory), Path.cwd())
+            manifest = json.loads(
+                (Path(check.evidence_path) / "manifest.json").read_text(encoding="utf-8")
+            )
+        self.assertEqual(check.status, "error")
+        self.assertIn("only outside child-linked activity", check.detail)
+        self.assertFalse(manifest["verification"]["marker_proven_for_child"])
 
     def test_cached_luna_model_check_is_advisory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -290,6 +374,10 @@ bounded worker
         self.assertIn("runtime use still requires smoke evidence", check.detail)
 
     def test_smoke_models_reports_unproven_model_honestly(self) -> None:
+        marker = "LUNA_SMOKE_OK_TEST"
+        version = subprocess.CompletedProcess(
+            args=["codex", "--version"], returncode=0, stdout="codex-cli test\n", stderr=""
+        )
         login = subprocess.CompletedProcess(
             args=["codex", "login", "status"], returncode=0, stdout="Logged in\n", stderr=""
         )
@@ -298,38 +386,23 @@ bounded worker
             returncode=0,
             stdout=(
                 '{"type":"item.completed","item":{"type":"collab_tool_call",'
-                '"receiver_thread_ids":["child-1"]}}\n'
-                '{"type":"item.completed","item":{"type":"agent_message",'
-                '"text":"LUNA_SMOKE_OK"}}\n'
+                '"receiver_thread_ids":["child-1"],'
+                f'"result":"{marker}","agents_states":{{"child-1":"completed"}}}}}}\n'
             ),
             stderr="",
         )
-        with mock.patch.object(installer, "run_command", side_effect=[login, smoke]):
-            check = installer.smoke_models("codex", Path("/tmp/test-codex-home"), Path.cwd())
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            installer, "run_command", side_effect=[version, login, smoke]
+        ), mock.patch.object(installer, "make_smoke_marker", return_value=marker):
+            check = installer.smoke_models("codex", Path(directory), Path.cwd())
         self.assertEqual(check.status, "error")
         self.assertIn("did not prove its effective model", check.detail)
 
     def test_smoke_models_requires_max_effort_proof(self) -> None:
-        login = subprocess.CompletedProcess(
-            args=["codex", "login", "status"], returncode=0, stdout="Logged in\n", stderr=""
+        marker = "LUNA_SMOKE_OK_TEST"
+        version = subprocess.CompletedProcess(
+            args=["codex", "--version"], returncode=0, stdout="codex-cli test\n", stderr=""
         )
-        smoke = subprocess.CompletedProcess(
-            args=["codex", "exec"],
-            returncode=0,
-            stdout=(
-                '{"type":"item.completed","item":{"type":"collab_tool_call",'
-                '"receiver_thread_ids":["child-1"],"model":"gpt-5.6-luna"}}\n'
-                '{"type":"item.completed","item":{"type":"agent_message",'
-                '"text":"LUNA_SMOKE_OK"}}\n'
-            ),
-            stderr="",
-        )
-        with mock.patch.object(installer, "run_command", side_effect=[login, smoke]):
-            check = installer.smoke_models("codex", Path("/tmp/test-codex-home"), Path.cwd())
-        self.assertEqual(check.status, "error")
-        self.assertIn("max effort", check.detail)
-
-    def test_smoke_models_passes_only_with_model_and_effort_proof(self) -> None:
         login = subprocess.CompletedProcess(
             args=["codex", "login", "status"], returncode=0, stdout="Logged in\n", stderr=""
         )
@@ -339,28 +412,102 @@ bounded worker
             stdout=(
                 '{"type":"item.completed","item":{"type":"collab_tool_call",'
                 '"receiver_thread_ids":["child-1"],"model":"gpt-5.6-luna",'
-                '"reasoning_effort":"max"}}\n'
-                '{"type":"item.completed","item":{"type":"agent_message",'
-                '"text":"LUNA_SMOKE_OK"}}\n'
+                f'"result":"{marker}","agents_states":{{"child-1":"completed"}}}}}}\n'
             ),
             stderr="",
         )
-        with mock.patch.object(installer, "run_command", side_effect=[login, smoke]):
-            check = installer.smoke_models("codex", Path("/tmp/test-codex-home"), Path.cwd())
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            installer, "run_command", side_effect=[version, login, smoke]
+        ), mock.patch.object(installer, "make_smoke_marker", return_value=marker):
+            check = installer.smoke_models("codex", Path(directory), Path.cwd())
+            manifest = json.loads(
+                (Path(check.evidence_path) / "manifest.json").read_text(encoding="utf-8")
+            )
+        self.assertEqual(check.status, "error")
+        self.assertIn("max effort", check.detail)
+        self.assertEqual(manifest["verification"]["verification_level"], "luna_verified")
+
+    def test_smoke_models_passes_only_with_model_and_effort_proof(self) -> None:
+        marker = "LUNA_SMOKE_OK_TEST"
+        version = subprocess.CompletedProcess(
+            args=["codex", "--version"], returncode=0, stdout="codex-cli test\n", stderr=""
+        )
+        login = subprocess.CompletedProcess(
+            args=["codex", "login", "status"], returncode=0, stdout="Logged in\n", stderr=""
+        )
+        smoke = subprocess.CompletedProcess(
+            args=["codex", "exec"],
+            returncode=0,
+            stdout=(
+                '{"type":"item.completed","item":{"type":"collab_tool_call",'
+                '"receiver_thread_ids":["child-1"],"model":"gpt-5.6-luna",'
+                f'"reasoning_effort":"max","result":"{marker}",'
+                '"agents_states":{"child-1":"completed"}}}\n'
+            ),
+            stderr="",
+        )
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            installer, "run_command", side_effect=[version, login, smoke]
+        ), mock.patch.object(installer, "make_smoke_marker", return_value=marker):
+            check = installer.smoke_models("codex", Path(directory), Path.cwd())
+            bundle = Path(check.evidence_path)
+            manifest_bytes = (bundle / "manifest.json").read_bytes()
+            events_bytes = (bundle / "events.jsonl").read_bytes()
+            manifest = json.loads(manifest_bytes)
+            checksums = (bundle / "SHA256SUMS").read_text(encoding="utf-8")
         self.assertEqual(check.status, "ok")
+        self.assertEqual(events_bytes, smoke.stdout.encode("utf-8"))
+        self.assertEqual(manifest["codex_version"], "codex-cli test")
+        self.assertEqual(manifest["verification"]["verification_level"], "luna_max_verified")
+        self.assertIn(installer.sha256_bytes(events_bytes), checksums)
+        self.assertIn(installer.sha256_bytes(manifest_bytes), checksums)
+        self.assertEqual(manifest["artifacts"]["events.jsonl"]["sha256"], installer.sha256_bytes(events_bytes))
+
+    def test_smoke_activity_rejects_ambiguous_effective_metadata(self) -> None:
+        marker = "LUNA_SMOKE_OK_TEST"
+        stdout = (
+            '{"type":"item.completed","item":{"type":"collab_tool_call",'
+            '"receiver_thread_ids":["child-1"],"model":"gpt-5.6-luna",'
+            '"selected_model":"gpt-5.6-sol","reasoning_effort":"max",'
+            f'"model_reasoning_effort":"high","result":"{marker}",'
+            '"agents_states":{"child-1":"completed"}}}\n'
+        )
+        assessment = installer.assess_smoke_activity(stdout, marker)
+        self.assertFalse(assessment["luna_model_proven"])
+        self.assertFalse(assessment["max_effort_proven"])
+        self.assertEqual(assessment["verification_level"], "requested_only")
+
+    def test_smoke_activity_retains_runtime_error_messages(self) -> None:
+        stdout = (
+            '{"type":"item.completed","item":{"type":"error",'
+            '"message":"transport timed out"}}\n'
+        )
+        assessment = installer.assess_smoke_activity(stdout, "LUNA_SMOKE_OK_TEST")
+        self.assertEqual(assessment["activity_errors"], ["transport timed out"])
 
     def test_smoke_models_explicitly_enables_subagent_capability(self) -> None:
+        version = subprocess.CompletedProcess(
+            args=["codex", "--version"], returncode=0, stdout="codex-cli test\n", stderr=""
+        )
         login = subprocess.CompletedProcess(
             args=["codex", "login", "status"], returncode=0, stdout="Logged in\n", stderr=""
         )
         failed = subprocess.CompletedProcess(
             args=["codex", "exec"], returncode=0, stdout="", stderr=""
         )
-        with mock.patch.object(installer, "run_command", side_effect=[login, failed]) as run:
-            installer.smoke_models("codex", Path("/tmp/test-codex-home"), Path.cwd())
-        command = run.call_args_list[1].args[0]
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            installer, "run_command", side_effect=[version, login, failed]
+        ) as run:
+            installer.smoke_models("codex", Path(directory), Path.cwd())
+        command = run.call_args_list[2].args[0]
         self.assertIn("multi_agent", command)
         self.assertIn("agents.enabled=true", command)
+        prompt = command[-1]
+        self.assertIn("functions.collaboration.spawn_agent", prompt)
+        self.assertIn("task_name luna_smoke", prompt)
+        self.assertIn("fork_turns none", prompt)
+        self.assertIn("model gpt-5.6-luna", prompt)
+        self.assertIn("reasoning_effort max", prompt)
 
 
 if __name__ == "__main__":

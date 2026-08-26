@@ -1,6 +1,6 @@
 # Codex Sol + Luna Workflow
 
-[简体中文](README.md) · [Installation](docs/installation.md) · [Architecture](docs/architecture.md) · [Benchmark](docs/benchmark.md)
+[简体中文](README.md) · [Installation](docs/installation.md) · [Architecture](docs/architecture.md) · [Runtime evidence](docs/evidence.md) · [Benchmark](docs/benchmark.md)
 
 An explicitly invoked, globally installable Codex orchestration plugin. It preserves the model selected for the main thread and delegates only bounded, independently verifiable work to GPT-5.6 Luna Max subagents.
 
@@ -54,7 +54,7 @@ The Codex CLI maintains the Marketplace and Plugin namespaces in its own `config
 ./installer/install.sh uninstall
 ```
 
-The default doctor is non-billable. `--smoke-models` makes one real, potentially billable subagent request. Uninstall removes only unchanged managed files and preserves user modifications.
+The default doctor is non-billable. `--smoke-models` makes one real, potentially billable subagent request and automatically saves raw JSONL, child ID, model and effort metadata, Codex version, UTC timestamps, and SHA-256 values under `${CODEX_HOME}/sol-luna/evidence/`. It passes only when the same completed child proves Luna, Max, and the unique marker. See [runtime evidence](docs/evidence.md). Uninstall removes only unchanged managed files, preserves user modifications, and leaves evidence bundles as user audit data.
 
 See [installation](docs/installation.md), [configuration](docs/configuration.md), and [troubleshooting](docs/troubleshooting.md) for details.
 

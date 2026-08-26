@@ -72,3 +72,5 @@ replaces only a Marketplace it previously created, refuses the operation if unre
 plugins depend on it, and attempts to restore the previous tag if replacement fails.
 
 The Marketplace is removed only if the installer originally added it and no installed plugin still uses it. Start a new Codex task after install or upgrade.
+
+Model-smoke bundles under `${CODEX_HOME}/sol-luna/evidence/` are user audit data and are not listed as managed files. Upgrade and uninstall leave them in place for manual review or removal.

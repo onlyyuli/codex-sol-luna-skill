@@ -1,6 +1,6 @@
 # Codex Sol + Luna Workflow
 
-[English](README.en.md) · [安装指南](docs/installation.md) · [架构](docs/architecture.md) · [评测](docs/benchmark.md)
+[English](README.en.md) · [安装指南](docs/installation.md) · [架构](docs/architecture.md) · [运行证据](docs/evidence.md) · [评测](docs/benchmark.md)
 
 一个显式调用、全局可安装的 Codex 编排插件：保留用户在前端选择的主线程模型，只把边界明确、可独立验证的工作派给 GPT-5.6 Luna Max 子 Agent。
 
@@ -98,7 +98,7 @@ Codex CLI 会在自己的 `config.toml` 中维护该 Marketplace 和 Plugin 的�
 ./installer/install.sh uninstall
 ```
 
-`doctor` 默认不调用模型。`--smoke-models` 会执行一次真实、可能计费的最小子 Agent 测试。
+`doctor` 默认不调用模型。`--smoke-models` 会执行一次真实、可能计费的最小子 Agent 测试，并把原始 JSONL、子线程 ID、模型与推理档位、Codex 版本、UTC 时间戳及 SHA-256 校验值自动保存到 `${CODEX_HOME}/sol-luna/evidence/`。只有同一个已完成子线程同时证明 Luna、Max 和唯一校验标记时才通过；详见 [运行证据](docs/evidence.md)。
 
 卸载只删除安装状态中登记且校验和未变化的文件；用户修改过的 settings、Agent 或 Profile 会被保留并明确报告。
 
