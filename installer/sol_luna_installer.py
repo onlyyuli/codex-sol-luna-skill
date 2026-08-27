@@ -369,7 +369,10 @@ def ensure_marketplace(
                 f"not {requested_source!r}."
             )
         reporter.emit("ok", f"Marketplace {MARKETPLACE_NAME} already uses the requested source.")
-        if upgrade and source_data.get("sourceType") != "local":
+        # A caller-provided repository root is authoritative evidence that this is a local
+        # development marketplace. Codex has emitted different sourceType values across
+        # platforms, while `marketplace upgrade` intentionally supports Git sources only.
+        if upgrade and repo_root is None and source_data.get("sourceType") != "local":
             run_command(
                 [codex, "plugin", "marketplace", "upgrade", MARKETPLACE_NAME],
                 codex_home=codex_home,

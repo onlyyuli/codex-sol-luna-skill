@@ -208,6 +208,59 @@ bounded worker
         with mock.patch.dict(os.environ, {"SOL_LUNA_REPOSITORY": "owner/repo"}, clear=False):
             self.assertEqual(installer.resolve_repository(None, None), "owner/repo")
 
+    def test_local_marketplace_upgrade_does_not_call_git_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo_root = Path(directory).resolve()
+            marketplace = {
+                installer.MARKETPLACE_NAME: {
+                    "marketplaceSource": {
+                        # Some Codex builds omit sourceType for local marketplaces.
+                        "source": str(repo_root),
+                    }
+                }
+            }
+            with mock.patch.object(
+                installer, "marketplace_map", return_value=marketplace
+            ), mock.patch.object(installer, "run_command") as run:
+                added = installer.ensure_marketplace(
+                    "codex",
+                    repo_root / "codex-home",
+                    "owner/repo",
+                    "v0.1.0",
+                    repo_root,
+                    installer.Reporter(),
+                    upgrade=True,
+                )
+        self.assertFalse(added)
+        run.assert_not_called()
+
+    def test_git_marketplace_upgrade_calls_refresh(self) -> None:
+        marketplace = {
+            installer.MARKETPLACE_NAME: {
+                "marketplaceSource": {
+                    "sourceType": "github",
+                    "source": "owner/repo",
+                }
+            }
+        }
+        with mock.patch.object(
+            installer, "marketplace_map", return_value=marketplace
+        ), mock.patch.object(installer, "run_command") as run:
+            added = installer.ensure_marketplace(
+                "codex",
+                Path("/tmp/test-codex-home"),
+                "owner/repo",
+                "v0.1.0",
+                None,
+                installer.Reporter(),
+                upgrade=True,
+            )
+        self.assertFalse(added)
+        run.assert_called_once_with(
+            ["codex", "plugin", "marketplace", "upgrade", installer.MARKETPLACE_NAME],
+            codex_home=Path("/tmp/test-codex-home"),
+        )
+
     def test_owned_marketplace_ref_rotation_is_bounded(self) -> None:
         state = {
             "repository": "owner/repo",

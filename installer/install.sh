@@ -5,7 +5,7 @@ if [ "$#" -eq 0 ]; then
   set -- install
 fi
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 local_installer="$script_dir/sol_luna_installer.py"
 
 if command -v python3 >/dev/null 2>&1; then
