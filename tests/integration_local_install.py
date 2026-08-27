@@ -43,8 +43,15 @@ def main() -> int:
     parser.add_argument(
         "--entrypoint", choices=("core", "shell", "powershell"), default="core"
     )
+    parser.add_argument(
+        "--codex-bin",
+        help="Explicit Codex executable to test instead of resolving codex from PATH",
+    )
     args = parser.parse_args()
-    if not shutil.which("codex"):
+    codex_bin = str(Path(args.codex_bin).expanduser().resolve()) if args.codex_bin else None
+    if codex_bin and not Path(codex_bin).is_file():
+        parser.error(f"Codex executable does not exist: {codex_bin}")
+    if not codex_bin and not shutil.which("codex"):
         print("SKIP: codex CLI is not installed")
         return 0
     with tempfile.TemporaryDirectory(prefix="sol-luna-integration-") as directory:
@@ -63,6 +70,8 @@ def main() -> int:
             "--local-marketplace",
             "--json",
         ]
+        if codex_bin:
+            options.extend(["--codex-bin", codex_bin])
         install = run(
             installer_command(args.entrypoint, "install", [*options, "--with-cli-profile"])
         )

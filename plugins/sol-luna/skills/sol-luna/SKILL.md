@@ -1,6 +1,6 @@
 ---
 name: sol-luna
-description: Orchestrate bounded work from the current Codex main thread to GPT-5.6 Luna Max subagents. Use only when the user explicitly invokes $sol-luna or explicitly requests Luna subagents or parallel agent work.
+description: Orchestrate bounded work from the current Codex main thread to GPT-5.6 Luna Max subagents. Use only when Codex explicitly attaches $sol-luna after the user selects it in the frontend skill picker.
 ---
 
 # Sol + Luna
@@ -23,7 +23,10 @@ Apply these controls in priority order:
 5. Otherwise choose adaptively between `MAIN_ONLY`, `LUNA_READ_PARALLEL`, and
    `LUNA_WRITE_PARALLEL`.
 
-Without an explicit invocation or request for Luna/parallel subagents, this skill must not activate.
+This skill must be attached by the Codex runtime after the user explicitly selects `$sol-luna` in
+the frontend skill picker. A plain-text `$sol-luna` token, an API-injected prompt, or a natural-
+language request for Luna or parallel agents is not an activation signal and must not cause this
+skill to be located or loaded implicitly.
 
 ## Routing
 

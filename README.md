@@ -2,7 +2,7 @@
 
 [English](README.en.md) · [安装指南](docs/installation.md) · [架构](docs/architecture.md) · [运行证据](docs/evidence.md) · [评测](docs/benchmark.md)
 
-一个显式调用、全局可安装的 Codex 编排插件：保留用户在前端选择的主线程模型，只把边界明确、可独立验证的工作派给 GPT-5.6 Luna Max 子 Agent。
+一个通过前端 Skill 选择器显式启用、全局可安装的 Codex 编排插件：保留用户在前端选择的主线程模型，只把边界明确、可独立验证的工作派给 GPT-5.6 Luna Max 子 Agent。
 
 > 这是社区项目，不是 OpenAI 官方预设。模型权限、有效推理档位、并发和实际路由取决于 Codex 版本及账户；只有 Agent 活动或工具元数据能证明实际运行的模型。
 
@@ -21,7 +21,7 @@ Codex 前端所选主模型（推荐 Sol）
                └─ LUNA_WRITE_PARALLEL → GPT-5.6 Luna Max
 ```
 
-- 普通对话不会自动激活该技能或创建子 Agent。
+- 普通对话、自然语言要求 Luna，或只输入未附加 Skill 的 `$sol-luna` 文本，都不会自动激活该技能或创建子 Agent。
 - Codex Desktop 的模型按钮始终控制主线程；插件不设置主线程模型。
 - 子 Agent 固定请求 `gpt-5.6-luna` 与 `max`。
 - 自适应并发为 2–4，显式上限为 8。
@@ -30,7 +30,7 @@ Codex 前端所选主模型（推荐 Sol）
 
 ## 使用
 
-自适应路由：
+先在 Codex 前端 Skill 选择器中选择 `$sol-luna`，确认它已成为本轮的 Skill 标签，再输入任务。自适应路由：
 
 ```text
 $sol-luna 完成这个任务
@@ -54,7 +54,7 @@ $sol-luna 使用 3 个 Luna，并行实现 UI、API 和测试
 不要使用子 Agent，只在主线程完成这个任务
 ```
 
-没有额外的前端开关；调用 `$sol-luna` 是开启入口，“不要使用子 Agent”是强制关闭入口。
+没有额外的前端开关；在前端选择并附加 `$sol-luna` 是唯一开启入口，“不要使用子 Agent”是强制关闭入口。仅在文本中键入 `$sol-luna`、通过任务 API 发送同名字符串，或用自然语言要求 Luna，均不视为已启用。
 
 ## 五分钟安装
 
@@ -77,7 +77,7 @@ Windows PowerShell：
 codex --profile sol-luna
 ```
 
-安装完成后新建一个 Codex 任务，再调用 `$sol-luna`。
+安装完成后新建一个 Codex 任务，再从前端 Skill 选择器中选择 `$sol-luna`。
 
 ### 纯 Plugin 安装
 

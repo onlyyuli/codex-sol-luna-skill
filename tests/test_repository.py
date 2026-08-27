@@ -23,6 +23,14 @@ class RepositoryContractTests(unittest.TestCase):
         metadata = (ROOT / "plugins/sol-luna/skills/sol-luna/agents/openai.yaml").read_text(encoding="utf-8")
         self.assertIn("allow_implicit_invocation: false", metadata)
 
+    def test_skill_trigger_requires_frontend_runtime_attachment(self) -> None:
+        skill = (ROOT / "plugins/sol-luna/skills/sol-luna/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("frontend skill picker", skill)
+        self.assertIn("API-injected prompt", skill)
+        self.assertNotIn("explicitly requests Luna subagents", skill)
+
     def test_root_does_not_pin_codex_model(self) -> None:
         self.assertFalse((ROOT / ".codex/config.toml").exists())
 

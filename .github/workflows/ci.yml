@@ -77,6 +77,8 @@ jobs:
           node-version: "22"
       - name: Install current Codex CLI
         run: npm install --global @openai/codex@latest
+      - name: Require a stable Codex CLI
+        run: python tools/check_codex_release.py
       - name: Exercise real plugin CLI in an isolated home
         run: python tests/integration_local_install.py
       - name: Exercise POSIX wrapper

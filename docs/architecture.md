@@ -16,7 +16,9 @@ Routes:
 - `LUNA_READ_PARALLEL`: independent evidence-gathering packets.
 - `LUNA_WRITE_PARALLEL`: independent packets with disjoint write scopes.
 
-The skill is explicit-only. An ordinary request cannot activate it through implicit skill selection.
+The skill is explicit-only. It activates only when the Codex runtime attaches it after the user
+selects `$sol-luna` in the frontend Skill picker. Ordinary prompts, natural-language Luna requests,
+raw `$sol-luna` text, and task-API messages cannot activate it through implicit discovery.
 
 ## Ownership and validation
 

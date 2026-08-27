@@ -47,6 +47,13 @@ If `codex-sol-luna` already points to another source, the installer stops. Inspe
 
 Account and workspace model access can differ. Adaptive `$sol-luna` work falls back to the main thread with disclosure. A request that explicitly requires Luna stops instead of substituting another model.
 
+## `$sol-luna` was not attached
+
+Start a new Codex task, open the frontend Skill picker, and select `$sol-luna` so it appears as an
+attached Skill for that turn. A raw `$sol-luna` string sent through the composer or task API is not
+equivalent to selecting the Skill. This is intentional: `allow_implicit_invocation` is disabled, so
+natural-language requests for Luna or parallel agents do not discover or load the workflow.
+
 ## A project still starts with Luna
 
 Check the current project for `.codex/config.toml` and the user `config.toml` for `model = "gpt-5.6-luna"`. This plugin never changes those values. Use the Desktop model picker or remove the separate pin yourself if it is no longer wanted.

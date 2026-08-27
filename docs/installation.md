@@ -49,6 +49,9 @@ python3 installer/sol_luna_installer.py install \
   --local-marketplace
 ```
 
+After installation, start a new Codex task and select `$sol-luna` from the frontend Skill picker.
+The workflow does not activate from a plain-text mention or natural-language request alone.
+
 Use a disposable home while developing:
 
 ```sh

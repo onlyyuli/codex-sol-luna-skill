@@ -1956,7 +1956,11 @@ def install_or_upgrade(args: argparse.Namespace, reporter: Reporter, upgrade: bo
         reporter.emit(check.status, f"doctor/{check.name}: {check.detail}")
     if failures:
         raise InstallerError("Post-install doctor reported errors.")
-    reporter.emit("ok", "Installation complete. Start a new Codex task before invoking $sol-luna.")
+    reporter.emit(
+        "ok",
+        "Installation complete. Start a new Codex task and select $sol-luna from the frontend "
+        "Skill picker.",
+    )
     return {"status": "ok", "action": "upgrade" if upgrade else "install", "state": new_state}
 
 

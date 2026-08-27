@@ -23,7 +23,8 @@ python3 benchmarks/summarize.py benchmark-results/results.jsonl
 For B and C, each disposable fixture contains a copy of the packaged Skill and the prompt explicitly
 loads that file. This avoids treating a raw `$sol-luna` string in non-interactive CLI input as proof
 that the client's interactive skill selector hydrated the Skill. Plugin discovery is tested
-separately by the isolated installer test.
+separately by the isolated installer test. The release checklist also requires a real frontend
+picker probe; the non-interactive benchmark cannot replace that UI gate.
 
 Record deterministic test pass rate, elapsed time, Token metadata when exposed, tool failures, write conflicts, and model evidence. Non-code outputs still require blind manual review; deterministic tests alone are not a complete quality score.
 
