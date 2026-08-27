@@ -11,20 +11,20 @@ Release-gate model smoke tests should use the current stable standalone Codex CL
 accepts `--codex-bin /absolute/path/to/codex`, or the equivalent `SOL_LUNA_CODEX_BIN` environment
 variable, when a desktop-bundled pre-release appears first on `PATH`.
 
-## Managed installation
+## Managed installation after v0.1.0 is released
 
 The release installer adds the pinned GitHub repository as `codex-sol-luna`, installs `sol-luna`, installs namespaced reader/worker Agent files, creates routing settings, and records checksums for safe upgrades and removal.
 
 macOS/Linux:
 
 ```sh
-curl -fsSL https://github.com/onlyyuli/codex-sol-luna-workflow/releases/download/v0.1.0/install.sh | sh -s -- install
+curl -fsSL https://github.com/onlyyuli/codex-sol-luna-skill/releases/download/v0.1.0/install.sh | sh -s -- install
 ```
 
 Windows:
 
 ```powershell
-& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing "https://github.com/onlyyuli/codex-sol-luna-workflow/releases/download/v0.1.0/install.ps1").Content)) install
+& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing "https://github.com/onlyyuli/codex-sol-luna-skill/releases/download/v0.1.0/install.ps1").Content)) install
 ```
 
 For security-sensitive environments, download `install.sh` or `install.ps1` and `SHA256SUMS`, verify the checksum, inspect the script, and then execute it locally.
@@ -45,19 +45,19 @@ From a clone:
 ```sh
 python3 installer/sol_luna_installer.py install \
   --repo-root . \
-  --repository onlyyuli/codex-sol-luna-workflow \
+  --repository onlyyuli/codex-sol-luna-skill \
   --local-marketplace
 ```
 
 After installation, start a new Codex task and select `$sol-luna` from the frontend Skill picker.
-The workflow does not activate from a plain-text mention or natural-language request alone.
+The Skill does not activate from a plain-text mention or natural-language request alone.
 
 Use a disposable home while developing:
 
 ```sh
 CODEX_HOME=/tmp/sol-luna-dev python3 installer/sol_luna_installer.py install \
   --repo-root . \
-  --repository onlyyuli/codex-sol-luna-workflow \
+  --repository onlyyuli/codex-sol-luna-skill \
   --local-marketplace
 ```
 

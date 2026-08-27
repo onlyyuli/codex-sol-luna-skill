@@ -1,6 +1,6 @@
 interface:
-  display_name: "Sol + Luna"
-  short_description: "Delegate bounded work to Luna Max workers"
-  default_prompt: "Use $sol-luna to complete this task with adaptive Luna Max delegation."
+  display_name: "Sol + Luna Skill"
+  short_description: "Explicit bounded delegation to Luna Max"
+  default_prompt: "Use $sol-luna to route bounded work to Luna Max subagents."
 policy:
   allow_implicit_invocation: false

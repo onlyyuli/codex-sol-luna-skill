@@ -66,7 +66,7 @@ def main() -> int:
             "--repo-root",
             str(ROOT),
             "--repository",
-            "onlyyuli/codex-sol-luna-workflow",
+            "onlyyuli/codex-sol-luna-skill",
             "--local-marketplace",
             "--json",
         ]

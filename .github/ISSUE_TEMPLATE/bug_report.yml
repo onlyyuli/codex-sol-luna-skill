@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible workflow, installer, or compatibility defect
+description: Report a reproducible Skill, installer, or compatibility defect
 title: "[Bug]: "
 labels: ["bug"]
 body:

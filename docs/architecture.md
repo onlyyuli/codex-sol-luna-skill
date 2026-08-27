@@ -26,7 +26,7 @@ Every writable file has one active owner. Shared interfaces, lockfiles, migratio
 
 ## Truthfulness boundary
 
-A config file proves intent, not execution. The workflow reports an effective model only when agent activity or tool metadata identifies it. Otherwise it reports that Luna Max was requested.
+A config file proves intent, not execution. The Skill reports an effective model only when agent activity or tool metadata identifies it. Otherwise it reports that Luna Max was requested.
 
 ## Failure behavior
 

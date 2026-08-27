@@ -1,7 +1,7 @@
 {
   "name": "codex-sol-luna",
   "interface": {
-    "displayName": "Codex Sol Luna"
+    "displayName": "Codex Sol + Luna Skill"
   },
   "plugins": [
     {

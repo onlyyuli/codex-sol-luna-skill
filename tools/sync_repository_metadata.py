@@ -15,7 +15,7 @@ from typing import Optional
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 CANONICAL_URL_PATTERN = re.compile(
-    r"https://github\.com/[A-Za-z0-9_.-]+/codex-sol-luna-workflow"
+    r"https://github\.com/[A-Za-z0-9_.-]+/codex-sol-luna-skill"
 )
 
 
@@ -45,8 +45,8 @@ def resolve_repository(explicit: Optional[str]) -> str:
 
 def expected_files(repository: str) -> dict[Path, str]:
     owner, name = repository.split("/", 1)
-    if name != "codex-sol-luna-workflow":
-        raise ValueError("Repository name must be codex-sol-luna-workflow.")
+    if name != "codex-sol-luna-skill":
+        raise ValueError("Repository name must be codex-sol-luna-skill.")
     canonical_url = f"https://github.com/{repository}"
     manifest_path = ROOT / "plugins/sol-luna/.codex-plugin/plugin.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

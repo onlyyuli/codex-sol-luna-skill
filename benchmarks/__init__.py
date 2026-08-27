@@ -1,1 +1,1 @@
-"""Evaluation tools for the Sol + Luna workflow."""
+"""Evaluation tools for the Codex Sol + Luna Skill."""

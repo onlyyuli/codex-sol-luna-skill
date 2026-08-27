@@ -3,7 +3,7 @@ name: sol-luna
 description: Orchestrate bounded work from the current Codex main thread to GPT-5.6 Luna Max subagents. Use only when Codex explicitly attaches $sol-luna after the user selects it in the frontend skill picker.
 ---
 
-# Sol + Luna
+# Sol + Luna Skill
 
 Keep the current main thread as the sole controller and final reviewer. Never change or claim to
 change the model selected for that thread. Recommend Sol for the main thread when asked, but call it

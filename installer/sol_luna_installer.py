@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Managed installer and doctor for the codex-sol-luna workflow."""
+"""Managed installer and doctor for the Codex Sol + Luna Skill."""
 
 from __future__ import annotations
 
@@ -1824,7 +1824,7 @@ def run_doctor(
                         Check(
                             "subagent concurrency",
                             "warning",
-                            f"base config allows {concurrency} concurrent child threads; workflow cap is 8",
+                            f"base config allows {concurrency} concurrent child threads; Skill cap is 8",
                         )
                     )
         except (OSError, ValueError, InstallerError) as exc:

@@ -12,7 +12,7 @@ Use `doctor --smoke-models` only when one real, potentially billable test is acc
 
 Every attempt writes `${CODEX_HOME}/sol-luna/evidence/smoke-*/events.jsonl`, `manifest.json`, and `SHA256SUMS`, including failures and timeouts. The human-readable output prints the bundle path, while `--json` exposes `checks[].evidence_path`. See [Luna Max smoke evidence](evidence.md) for the verification levels, integrity check, privacy warning, and retention behavior.
 
-The smoke test uses the login associated with the selected `CODEX_HOME`. A disposable home normally has no login, so run the non-billable installation tests there and run the model smoke from an installed, authenticated home. If it times out, check `codex doctor --json` for provider and WebSocket reachability before changing the workflow configuration.
+The smoke test uses the login associated with the selected `CODEX_HOME`. A disposable home normally has no login, so run the non-billable installation tests there and run the model smoke from an installed, authenticated home. If it times out, check `codex doctor --json` for provider and WebSocket reachability before changing the Skill configuration.
 
 The smoke command disables unrelated plugins and keeps the parent/child sessions inspectable. For
 that process only, it selects a temporary `sol_luna_smoke_http` provider that uses the normal Codex
@@ -35,7 +35,7 @@ forever.
 
 Codex multi-agent tool surfaces are capability-dependent. Some releases may hide per-child
 `model`/`reasoning_effort` fields or a custom-agent selector even when `multi_agent` itself is
-enabled. With `strict_model = true`, this workflow treats that runtime as incompatible rather than
+enabled. With `strict_model = true`, this Skill treats that runtime as incompatible rather than
 spawning an inherited child and calling it Luna. The optional CLI Profile supplies requested
 defaults, but activity metadata is still required before reporting effective Luna Max use.
 
@@ -52,7 +52,7 @@ Account and workspace model access can differ. Adaptive `$sol-luna` work falls b
 Start a new Codex task, open the frontend Skill picker, and select `$sol-luna` so it appears as an
 attached Skill for that turn. A raw `$sol-luna` string sent through the composer or task API is not
 equivalent to selecting the Skill. This is intentional: `allow_implicit_invocation` is disabled, so
-natural-language requests for Luna or parallel agents do not discover or load the workflow.
+natural-language requests for Luna or parallel agents do not discover or load the Skill.
 
 ## A project still starts with Luna
 

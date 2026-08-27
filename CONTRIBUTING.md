@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for improving codex-sol-luna-workflow.
+Thank you for improving codex-sol-luna-skill.
 
 Use Conventional Commits and keep changes project-agnostic. Do not add root model pins, implicit skill activation, silent model fallbacks, overlapping write ownership, or destructive installer behavior.
 
