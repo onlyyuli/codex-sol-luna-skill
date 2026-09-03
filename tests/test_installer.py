@@ -322,7 +322,7 @@ enabled = true
             command.call_args_list[0].args[0],
             ["codex", "plugin", "marketplace", "remove", installer.MARKETPLACE_NAME, "--json"],
         )
-        self.assertIn("/tmp/new-repository", command.call_args_list[1].args[0])
+        self.assertIn(str(Path("/tmp/new-repository")), command.call_args_list[1].args[0])
         ensure.assert_called_once()
 
     def test_marketplace_source_replacement_refuses_unowned_entry(self) -> None:

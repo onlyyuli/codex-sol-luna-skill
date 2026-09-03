@@ -2116,12 +2116,22 @@ def install_or_upgrade(args: argparse.Namespace, reporter: Reporter, upgrade: bo
         with_profile=args.with_cli_profile or bool(state.get("with_cli_profile", False)),
         reporter=reporter,
     )
+    requested_marketplace_source = (
+        str(repo_root) if args.local_marketplace and repo_root else repository
+    )
+    configured_source = configured_marketplace(codex_home, MARKETPLACE_NAME)
+    recorded_marketplace_source = (
+        configured_source["source"] if configured_source else requested_marketplace_source
+    )
     new_state = {
         "schema_version": 1,
         "installer_version": VERSION,
         "repository": repository,
         "ref": ref,
-        "marketplace_source": str(repo_root) if args.local_marketplace and repo_root else repository,
+        # Record the exact value written by Codex. This matters on Windows: once a
+        # local source is moved, short-path and canonical aliases can no longer be
+        # resolved with filesystem APIs even though they referred to the same path.
+        "marketplace_source": recorded_marketplace_source,
         "marketplace_name": MARKETPLACE_NAME,
         "marketplace_added": previously_added or added_now,
         "plugin_id": PLUGIN_ID,
@@ -2142,7 +2152,7 @@ def install_or_upgrade(args: argparse.Namespace, reporter: Reporter, upgrade: bo
         cwd=Path.cwd(),
         smoke=False,
         repository=repository,
-        marketplace_source=str(repo_root) if args.local_marketplace and repo_root else repository,
+        marketplace_source=requested_marketplace_source,
         codex_executable=codex,
     )
     failures = [check for check in checks if check.status == "error"]
