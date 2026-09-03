@@ -9,7 +9,12 @@
    `--codex-bin` when necessary. Run `tools/check_codex_release.py`, then run
    `doctor --smoke-models` once from the installed plugin, require `luna_max_verified`, verify
    `SHA256SUMS`, and retain the complete evidence bundle.
-4. Run or explicitly defer the billable benchmark matrix; do not claim performance without results.
+4. Run the billable matrix with `--capture-session-usage` and summarize it. Require complete
+   parent/child evidence and paired baselines for all 18 tasks with at least three trials each.
+   Require at least 15% median Credit savings overall, at least 30% on economy-eligible tasks, no
+   more than five percentage points of pass-rate loss, exact route-contract matches, zero duplicate
+   execution, and verified Luna Max for every delegated run. Do not claim release-grade savings
+   from a canary.
 5. Tag `v0.1.0-rc.1` for three-platform installation validation. The `codex-integration` job must
    pass on `ubuntu-latest`, `macos-latest`, and `windows-latest`; a locally parsed workflow is not a
    substitute for those three runner results.

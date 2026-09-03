@@ -4,9 +4,9 @@
 
 [English](README.en.md) · [安装](docs/installation.md) · [架构](docs/architecture.md) · [运行证据](docs/evidence.md) · [评测](docs/benchmark.md)
 
-一枚**由用户显式启用、证据优先、边界清晰**的 Codex Skill。
+一枚**由用户显式启用、以真实额度节省为目标、证据优先**的 Codex Skill。
 
-主线程始终使用你在 Codex 前端选择的模型；只有适合拆分且可独立验证的工作，才会请求 `gpt-5.6-luna`、`max` 的叶子子 Agent。主线程保留路由、架构、安全、整合与最终验收权。
+主线程始终使用你在 Codex 前端选择的模型；非简单且边界清晰的执行工作会优先交给一个 `gpt-5.6-luna`、`max` 叶子 Agent，只有实质独立的重任务才会并行。主线程保留路由、架构、安全、整合与最终验收权，但不会重复 Luna 已完成的工作。
 
 > [!IMPORTANT]
 > 当前代码树以 `v0.1.0` 为目标，尚未发布正式 GitHub Release。现在请使用下方“从源码安装”；Release 下载命令仅在对应标签发布后可用。
@@ -18,11 +18,12 @@
 
 本仓库交付一个用于分发和安装的 Codex Plugin，其中面向用户的核心能力是一枚名为 `$sol-luna` 的 Skill。托管安装还可以安装两个 namespaced Agent 模板、独立 settings 和可选 CLI Profile。
 
-它解决三个具体问题：
+它解决四个具体问题：
 
 - **开关明确**：只有从 Codex 前端 Skill 选择器选择并附加 `$sol-luna` 才会启用。
 - **职责明确**：主线程决策与验收，Luna Reader/Worker 只完成边界明确的任务包。
 - **证据明确**：配置只能证明“请求了 Luna Max”；实际模型必须由 Agent 活动或工具元数据证明。
+- **节省可测**：父线程和每个子线程分别核算 Credit；缺少子线程用量时不声称节省。
 
 它不会修改 Codex Desktop 的模型按钮，不会把普通对话自动变成多 Agent，也不会用其他模型静默冒充 Luna。
 
@@ -36,19 +37,23 @@ Codex 前端选择的主模型（Sol 仅为建议）
         └─ 前端选择并附加 $sol-luna
                     │
                     ├─ MAIN_ONLY ─────────────> 当前主线程
-                    ├─ LUNA_READ_PARALLEL ────> Luna Max Reader
-                    └─ LUNA_WRITE_PARALLEL ───> Luna Max Worker
+                    ├─ LUNA_SINGLE_READ ──────> 1 个 Luna Max Reader
+                    ├─ LUNA_SINGLE_WRITE ─────> 1 个 Luna Max Worker
+                    ├─ LUNA_READ_PARALLEL ────> 独立的 Luna Max Readers
+                    └─ LUNA_WRITE_PARALLEL ───> 互斥范围的 Luna Max Workers
                                                    │
-                                                   └─ 主线程检查 diff、测试并验收
+                                                   └─ 主线程定向检查并验收
 ```
 
 | 路由 | 适用条件 | 子 Agent 行为 |
 |---|---|---|
-| `MAIN_ONLY` | 简单、强耦合、顺序、高风险或明确禁用子 Agent | 创建 0 个子线程 |
-| `LUNA_READ_PARALLEL` | 至少两个独立的探索、审查、分析或测试任务 | 只读并行返回证据 |
-| `LUNA_WRITE_PARALLEL` | 至少两个可独立验证且写入范围互斥的任务包 | 每个文件只有一个活跃负责人 |
+| `MAIN_ONLY` | 简单、高风险、架构决策或委派后仍需主线程重复执行 | 创建 0 个子线程 |
+| `LUNA_SINGLE_READ` | 一个有界的非简单探索、审查或诊断 | 一个 Reader 替代主线程的主要调查 |
+| `LUNA_SINGLE_WRITE` | 一个有界实现、测试或文档任务 | 一个 Worker 完成实现和局部验证 |
+| `LUNA_READ_PARALLEL` | 独立重范围拆开后可减少无关上下文 | Reader 分别返回可验证证据 |
+| `LUNA_WRITE_PARALLEL` | 独立输入、验证和互斥写入范围 | 每个文件只有一个活跃负责人 |
 
-自适应并发为 2–4。显式数量允许 1–8；请求超过 8 会被拒绝，不会静默截断。子 Agent 是叶子节点，不能继续创建孙 Agent。
+自适应并发为 1–2，默认优先单 Luna。显式数量仍允许 1–8；3–8 会提示可能比单 Agent 消耗更多 Credit，请求超过 8 会被拒绝。子 Agent 是叶子节点，不能继续创建孙 Agent。
 
 ## 从源码安装（当前可用）
 
@@ -85,7 +90,7 @@ Set-Location codex-sol-luna-skill
 
 | 目标 | 选择 Skill 后输入 |
 |---|---|
-| 自适应路由 | `完成这个任务，并在适合时拆分独立工作包。` |
+| 最省额度的自适应路由 | `完成这个任务；优先让一个 Luna 替代主要执行，只在更省上下文时并行。` |
 | 四个只读 Reader | `使用 4 个 Luna，只读并行分析这个仓库。` |
 | 三个互斥 Worker | `使用 3 个 Luna，并行实现 UI、API 和测试；写入范围不能重叠。` |
 | 强制主线程 | `不要使用子 Agent，只在主线程完成。` |
@@ -98,11 +103,22 @@ Set-Location codex-sol-luna-skill
 
 这是刻意设计的显式开关；`allow_implicit_invocation` 固定为 `false`。“不要使用子 Agent”的优先级最高。
 
+## 当前额度验证状态
+
+2026-09-03 使用稳定版 Codex CLI 0.153.0 做了一个低成本 canary：同一耦合改造任务的
+Sol-only 基线为 9.303 Credits，两次 Sol + 单 Luna Max 分别为 5.550 和 6.001 Credits，
+功能验证均通过，观察到 35.50%–40.35% 的方向性降幅；但耗时约为基线的两倍。
+
+这**不是发布级节省承诺**。样本只有一个任务和一个基线，完整门禁仍要求 18 个任务各至少
+3 次。去除本地路径和对话内容的结构化数据见
+[`benchmarks/canary-2026-09-03.json`](benchmarks/canary-2026-09-03.json)，方法和限制见
+[评测说明](docs/benchmark.md)。
+
 ## Main、Reader、Worker 的职责
 
 | 角色 | 负责 | 不负责 |
 |---|---|---|
-| 当前主线程 | 需求解释、路由、架构、安全、文件所有权、整合、测试和最终回复 | 不把未验证的子 Agent 自述当作完成证据 |
+| 当前主线程 | 需求解释、路由、架构、安全、文件所有权、定向整合验收和最终回复 | 重复 Luna 的搜索、阅读、实现或完整验证 |
 | `sol_luna_reader` | 代码探索、审查、资料整理和测试分析 | 编辑文件、架构裁决、最终验收、继续派发 |
 | `sol_luna_worker` | 任务包授权范围内的实现、测试和文档修改 | 越过 `write_scope`、修改共享所有权、最终验收、继续派发 |
 
@@ -159,10 +175,12 @@ codex --profile sol-luna
 托管安装创建 `${CODEX_HOME}/sol-luna/settings.toml`：
 
 ```toml
-auto_min_agents = 2
-auto_max_agents = 4
+routing_objective = "minimize-credits"
+auto_min_agents = 1
+auto_max_agents = 2
 hard_max_agents = 8
 write_parallelism = "disjoint-only"
+parent_review = "targeted"
 strict_model = true
 announce_route = true
 ```
@@ -173,7 +191,7 @@ announce_route = true
 - 安装器只管理登记且校验和未变化的文件；用户修改过的文件会保留。
 - 基础 `config.toml` 中已有的模型、权限和无关字段不会被安装器重写。
 - v0.1.0 不包含 MCP、App、Hook、遥测或外部账号认证。
-- 尚未完成真实 A/B 评测前，本项目不声称任何性能倍数。
+- benchmark 只有在父/子用量证据完整时才计算总 Credit；尚未通过真实 A/B 门禁前不声称节省比例。
 
 详见[配置说明](docs/configuration.md)、[架构](docs/architecture.md)和[故障排查](docs/troubleshooting.md)。
 
@@ -196,6 +214,7 @@ python3 tools/validate_repository.py
 python3 -m unittest discover -s tests -p "test_*.py"
 python3 -m unittest discover -s benchmarks/fixture/tests -t benchmarks/fixture
 python3 tests/integration_local_install.py
+python3 benchmarks/run_matrix.py
 ```
 
 最后一个测试使用临时 `CODEX_HOME`，不会接触现有 Codex 配置。真实 smoke 和 A/B benchmark 可能产生费用，默认不会自动执行。

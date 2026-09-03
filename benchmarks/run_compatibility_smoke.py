@@ -26,6 +26,10 @@ def main() -> int:
     parser.add_argument("--output", default="benchmark-results/compatibility.jsonl")
     parser.add_argument("--timeout-seconds", type=int, default=600)
     parser.add_argument(
+        "--codex-bin",
+        help="Explicit stable Codex executable instead of resolving codex from PATH",
+    )
+    parser.add_argument(
         "--execute",
         action="store_true",
         help="Required acknowledgement because this runs two billable Codex model calls",
@@ -36,10 +40,15 @@ def main() -> int:
     if not args.execute:
         print("Dry run: 2 billable main-thread compatibility checks would run. Add --execute.")
         return 0
-    if not shutil.which("codex"):
+    codex_bin = (
+        str(Path(args.codex_bin).expanduser().resolve())
+        if args.codex_bin
+        else shutil.which("codex")
+    )
+    if not codex_bin or not Path(codex_bin).is_file():
         parser.error("codex CLI is required")
     login = subprocess.run(
-        ["codex", "login", "status"], text=True, capture_output=True, check=False
+        [codex_bin, "login", "status"], text=True, capture_output=True, check=False
     )
     if login.returncode != 0:
         parser.error("Codex must be logged in before --execute")
@@ -56,7 +65,7 @@ def main() -> int:
                 try:
                     result = subprocess.run(
                         [
-                            "codex",
+                            codex_bin,
                             "exec",
                             "--json",
                             "--ephemeral",

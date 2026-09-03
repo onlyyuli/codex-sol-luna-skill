@@ -1,34 +1,33 @@
-# Task packet contract
+# Compact task packet contract
 
-Use this contract for every delegated agent. Omit no field; use `none` when a field is intentionally
-empty.
+Every delegated agent receives a self-contained packet with no unrelated conversation history.
+Use `none` only where an optional field is intentionally empty.
 
 ```text
 id: stable packet identifier
 role: reader | worker
 objective: one bounded outcome
-context_and_evidence: only facts needed for this packet
-read_scope: files, directories, or resources the agent may inspect
-write_scope: exact files the agent may edit, or none
-constraints: permissions, compatibility, style, and non-goals
-acceptance_criteria: observable conditions for success
-validation: exact checks or commands the agent should run
-return_contract: the result fields listed below
+scope: exact files, directories, or resources needed for the outcome
+write_scope: exact writable paths, or none
+constraints: permissions, compatibility requirements, and non-goals
+acceptance: observable conditions for success
+validation: smallest sufficient checks the child should run
+evidence_budget: concise facts and paths; no full logs or large source excerpts
 stop_conditions: ambiguity, scope expansion, risk, unavailable validation, or two failed attempts
 ```
 
-Require this return shape:
+Require this compact return shape:
 
 ```text
 status: completed | blocked | failed
-summary: concise result
-files_inspected: exact paths
+outcome: concise result
+evidence: exact paths and essential facts supporting the outcome
 files_changed: exact paths, or none
-commands_and_results: each command and its outcome
-evidence: facts supporting the conclusion
-remaining_risks: unresolved risks, or none
-decision_needed: question for the main thread, or none
+validation: commands/checks and pass/fail result; omit routine full output
+risk_or_blocker: unresolved risk, needed decision, or none
 ```
 
-The child does not approve the overall task. If repository facts contradict the packet, it returns
-the contradiction instead of silently redefining the work.
+The child does not approve the overall task. It reports contradictions instead of silently
+redefining the packet. Prefer paths, symbols, and short factual excerpts over copied logs. The main
+thread requests one bounded correction from the same child when evidence is insufficient; it does
+not redo the packet by default.

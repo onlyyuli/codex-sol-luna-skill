@@ -51,10 +51,12 @@ PROFILE_RESOURCE = (
     "profile",
 )
 SETTINGS_KEYS = {
+    "routing_objective",
     "auto_min_agents",
     "auto_max_agents",
     "hard_max_agents",
     "write_parallelism",
+    "parent_review",
     "strict_model",
     "announce_route",
 }
@@ -325,6 +327,48 @@ def marketplace_source_matches(actual: str, expected: str, source_type: str) -> 
     return normalize_marketplace_source(actual) == normalize_marketplace_source(expected)
 
 
+def configured_marketplace(codex_home: Path, name: str) -> Optional[dict[str, str]]:
+    """Read one configured marketplace without loading its manifest.
+
+    `codex plugin marketplace list` validates every configured source. A moved or
+    deleted local source can therefore prevent the CLI from listing the very entry
+    that must be repaired. Reading only the marketplace namespace lets the installer
+    prove ownership before asking the official CLI to remove it; the installer never
+    writes config.toml directly.
+    """
+    config_path = codex_home / "config.toml"
+    if not config_path.is_file():
+        return None
+    config = parse_toml_file(config_path)
+    marketplaces = config.get("marketplaces")
+    if not isinstance(marketplaces, dict):
+        return None
+    entry = marketplaces.get(name)
+    if not isinstance(entry, dict):
+        return None
+    source = entry.get("source")
+    source_type = entry.get("source_type")
+    if not isinstance(source, str) or not isinstance(source_type, str):
+        return None
+    return {"source": source, "source_type": source_type}
+
+
+def configured_marketplace_plugins(codex_home: Path, name: str) -> set[str]:
+    config_path = codex_home / "config.toml"
+    if not config_path.is_file():
+        return set()
+    config = parse_toml_file(config_path)
+    plugins = config.get("plugins")
+    if not isinstance(plugins, dict):
+        return set()
+    suffix = f"@{name}"
+    return {
+        plugin_id
+        for plugin_id in plugins
+        if isinstance(plugin_id, str) and plugin_id.endswith(suffix)
+    }
+
+
 def marketplace_map(codex: str, codex_home: Path) -> dict[str, dict[str, Any]]:
     payload = command_json([codex, "plugin", "marketplace", "list", "--json"], codex_home)
     entries = payload.get("marketplaces", [])
@@ -399,6 +443,134 @@ def ensure_plugin(codex: str, codex_home: Path, reporter: Reporter) -> None:
     if result.get("pluginId") != PLUGIN_ID:
         raise InstallerError(f"Codex installed an unexpected plugin: {result!r}")
     reporter.emit("ok", f"Plugin {PLUGIN_ID} installed at version {result.get('version', 'unknown')}.")
+
+
+def marketplace_add_command(
+    codex: str,
+    *,
+    source: str,
+    source_type: str,
+    ref: str,
+) -> list[str]:
+    command = [codex, "plugin", "marketplace", "add", source]
+    if source_type != "local":
+        command.extend(["--ref", ref])
+    command.append("--json")
+    return command
+
+
+def replace_owned_marketplace_source(
+    codex: str,
+    codex_home: Path,
+    *,
+    state: dict[str, Any],
+    repository: str,
+    ref: str,
+    repo_root: Optional[Path],
+    reporter: Reporter,
+) -> bool:
+    """Replace an installer-owned marketplace whose source changed.
+
+    This also repairs a moved/deleted local repository because removal does not
+    require Codex to load the old marketplace manifest. Every mutation still goes
+    through the official plugin CLI.
+    """
+    existing = configured_marketplace(codex_home, MARKETPLACE_NAME)
+    if not existing:
+        return False
+    requested_source = str(repo_root) if repo_root else repository
+    requested_type = "local" if repo_root else "github"
+    actual_source = existing["source"]
+    actual_type = existing["source_type"]
+    if marketplace_source_matches(actual_source, requested_source, actual_type):
+        return False
+
+    if not state.get("marketplace_added"):
+        raise InstallerError(
+            f"Marketplace {MARKETPLACE_NAME!r} points to {actual_source!r}, but the installer "
+            "does not own it. Remove or rename that marketplace manually."
+        )
+    if state.get("marketplace_name") != MARKETPLACE_NAME or state.get("plugin_id") != PLUGIN_ID:
+        raise InstallerError(
+            "Installer state does not exactly identify the configured marketplace and plugin; "
+            "refusing to replace the source."
+        )
+    recorded_source = state.get("marketplace_source") or state.get("repository")
+    if not isinstance(recorded_source, str) or not marketplace_source_matches(
+        actual_source, recorded_source, actual_type
+    ):
+        raise InstallerError(
+            f"Marketplace {MARKETPLACE_NAME!r} no longer matches its installer state; "
+            "refusing to replace it."
+        )
+    unrelated = configured_marketplace_plugins(codex_home, MARKETPLACE_NAME) - {PLUGIN_ID}
+    if unrelated:
+        raise InstallerError(
+            "Cannot replace the marketplace while unrelated configured plugins use it: "
+            + ", ".join(sorted(unrelated))
+        )
+
+    old_ref = state.get("ref") if isinstance(state.get("ref"), str) else DEFAULT_REF
+    command_json(
+        [codex, "plugin", "marketplace", "remove", MARKETPLACE_NAME, "--json"],
+        codex_home,
+    )
+    try:
+        added = command_json(
+            marketplace_add_command(
+                codex,
+                source=requested_source,
+                source_type=requested_type,
+                ref=ref,
+            ),
+            codex_home,
+        )
+        if added.get("marketplaceName") != MARKETPLACE_NAME:
+            raise InstallerError(
+                f"Replacement source reported {added.get('marketplaceName')!r}; expected "
+                f"{MARKETPLACE_NAME!r}."
+            )
+        ensure_plugin(codex, codex_home, reporter)
+    except (InstallerError, subprocess.TimeoutExpired) as exc:
+        rollback_errors = []
+        try:
+            if configured_marketplace(codex_home, MARKETPLACE_NAME):
+                command_json(
+                    [codex, "plugin", "marketplace", "remove", MARKETPLACE_NAME, "--json"],
+                    codex_home,
+                )
+            if actual_type == "local" and not Path(actual_source).expanduser().is_dir():
+                rollback_errors.append("previous local marketplace no longer exists")
+            else:
+                restored = command_json(
+                    marketplace_add_command(
+                        codex,
+                        source=actual_source,
+                        source_type=actual_type,
+                        ref=old_ref,
+                    ),
+                    codex_home,
+                )
+                if restored.get("marketplaceName") != MARKETPLACE_NAME:
+                    rollback_errors.append("restored marketplace reported an unexpected name")
+                else:
+                    ensure_plugin(codex, codex_home, reporter)
+        except (InstallerError, subprocess.TimeoutExpired) as rollback_exc:
+            rollback_errors.append(str(rollback_exc))
+        if rollback_errors:
+            raise InstallerError(
+                f"Marketplace source replacement failed ({exc}); rollback was unavailable or "
+                f"failed: {'; '.join(rollback_errors)}"
+            ) from exc
+        raise InstallerError(
+            f"Marketplace source replacement failed and the previous source was restored: {exc}"
+        ) from exc
+
+    reporter.emit(
+        "ok",
+        f"Marketplace {MARKETPLACE_NAME} moved from {actual_source!r} to {requested_source!r}.",
+    )
+    return True
 
 
 def rotate_owned_marketplace_ref(
@@ -592,6 +764,8 @@ def validate_settings_data(value: Any) -> list[str]:
     unknown = set(value) - SETTINGS_KEYS
     if unknown:
         errors.append(f"unknown settings keys: {', '.join(sorted(unknown))}")
+    if value.get("routing_objective") != "minimize-credits":
+        errors.append('routing_objective must be "minimize-credits"')
     limit_types_valid = True
     for key in ("auto_min_agents", "auto_max_agents", "hard_max_agents"):
         if type(value.get(key)) is not int:
@@ -605,6 +779,8 @@ def validate_settings_data(value: Any) -> list[str]:
             errors.append("agent limits must satisfy 1 <= min <= auto max <= hard max <= 8")
     if value.get("write_parallelism") not in {"off", "disjoint-only"}:
         errors.append('write_parallelism must be "off" or "disjoint-only"')
+    if value.get("parent_review") != "targeted":
+        errors.append('parent_review must be "targeted"')
     for key in ("strict_model", "announce_route"):
         if type(value.get(key)) is not bool:
             errors.append(f"{key} must be a boolean")
@@ -1893,8 +2069,21 @@ def install_or_upgrade(args: argparse.Namespace, reporter: Reporter, upgrade: bo
 
     base_config = codex_home / "config.toml"
     base_before = base_config.read_bytes() if base_config.exists() else b""
+    source_replaced = bool(
+        upgrade
+        and replace_owned_marketplace_source(
+            codex,
+            codex_home,
+            state=state,
+            repository=repository,
+            ref=ref,
+            repo_root=repo_root if args.local_marketplace else None,
+            reporter=reporter,
+        )
+    )
     rotated = bool(
         upgrade
+        and not source_replaced
         and not args.local_marketplace
         and rotate_owned_marketplace_ref(
             codex,
@@ -1905,16 +2094,18 @@ def install_or_upgrade(args: argparse.Namespace, reporter: Reporter, upgrade: bo
             reporter=reporter,
         )
     )
-    added_now = ensure_marketplace(
-        codex,
-        codex_home,
-        repository,
-        ref,
-        repo_root if args.local_marketplace else None,
-        reporter,
-        upgrade and not rotated,
-    )
-    if not rotated:
+    added_now = False
+    if not source_replaced:
+        added_now = ensure_marketplace(
+            codex,
+            codex_home,
+            repository,
+            ref,
+            repo_root if args.local_marketplace else None,
+            reporter,
+            upgrade and not rotated,
+        )
+    if not rotated and not source_replaced:
         ensure_plugin(codex, codex_home, reporter)
     managed = install_resources(
         codex_home,

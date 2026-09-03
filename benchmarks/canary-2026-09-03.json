@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-03",
+  "codex_cli": "0.153.0",
+  "rate_card": "benchmarks/credit_rates.json",
+  "task": {
+    "id": "coupled-01",
+    "description": "Refactor the public service function to return a typed result object while keeping callers and tests compatible."
+  },
+  "runs": [
+    {
+      "arm": "A",
+      "route": "MAIN_ONLY",
+      "main_model": "gpt-5.6-sol",
+      "main_reasoning_effort": "high",
+      "child_count": 0,
+      "elapsed_seconds": 230.496,
+      "validation_passed": true,
+      "parent_usage": {
+        "input_tokens": 344000,
+        "cached_input_tokens": 299776,
+        "output_tokens": 3766
+      },
+      "parent_credits": 9.30316,
+      "child_credits": 0.0,
+      "total_credits": 9.30316
+    },
+    {
+      "arm": "B",
+      "route": "LUNA_SINGLE_WRITE",
+      "main_model": "gpt-5.6-sol",
+      "main_reasoning_effort": "high",
+      "child_count": 1,
+      "child_model_proven": "gpt-5.6-luna",
+      "child_reasoning_effort_proven": "max",
+      "elapsed_seconds": 454.028,
+      "validation_passed": true,
+      "parent_usage": {
+        "input_tokens": 179388,
+        "cached_input_tokens": 157056,
+        "output_tokens": 2279
+      },
+      "child_usage": {
+        "input_tokens": 466045,
+        "cached_input_tokens": 428288,
+        "output_tokens": 6780
+      },
+      "parent_credits": 4.94326,
+      "child_credits": 0.606329,
+      "total_credits": 5.549589,
+      "credit_savings_vs_a": 0.403473,
+      "duplicate_tool_call_count": 0
+    },
+    {
+      "arm": "B",
+      "route": "LUNA_SINGLE_WRITE",
+      "main_model": "gpt-5.6-sol",
+      "main_reasoning_effort": "high",
+      "child_count": 1,
+      "child_model_proven": "gpt-5.6-luna",
+      "child_reasoning_effort_proven": "max",
+      "elapsed_seconds": 448.464,
+      "validation_passed": true,
+      "parent_usage": {
+        "input_tokens": 125953,
+        "cached_input_tokens": 90752,
+        "output_tokens": 1876
+      },
+      "child_usage": {
+        "input_tokens": 374155,
+        "cached_input_tokens": 324096,
+        "output_tokens": 7428
+      },
+      "parent_credits": 5.36562,
+      "child_credits": 0.635183,
+      "total_credits": 6.000803,
+      "credit_savings_vs_a": 0.354972,
+      "duplicate_tool_call_count": 0
+    }
+  ],
+  "interpretation": {
+    "directional_credit_savings_observed": true,
+    "quality_checks_passed": true,
+    "luna_max_runtime_proven_for_delegated_runs": true,
+    "speed_improvement_observed": false,
+    "full_release_gate_passed": false,
+    "reason": "One task and one baseline are insufficient; the release gate requires all 18 tasks with at least three trials each."
+  }
+}

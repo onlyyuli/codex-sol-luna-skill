@@ -1,43 +1,96 @@
-# Benchmark
+# Credit benchmark
 
-The repository includes 18 tasks across read-heavy exploration, tests, documentation, disjoint implementation, coupled refactoring, and high-risk decisions. Each run starts from a fresh copy of `benchmarks/fixture`.
+The benchmark answers one release question: does economy routing reduce total Credits without
+breaking task quality or safety?
 
-Arms:
+## Arms
 
-- A: Sol main thread, no subagents.
-- B: Sol main thread with adaptive `$sol-luna`.
-- C: Sol main thread with forced four-Luna delegation only for eligible tasks.
-- D: separate Luna/Terra main-thread compatibility smoke checks; not part of the performance aggregate.
+- A: Sol main thread with no subagents.
+- B: Sol main thread with adaptive, minimum-Credit `$sol-luna` routing.
+- C: Sol main thread with four Luna agents forced only for parallelizable tasks.
+- D: separate Luna/Terra main-thread compatibility smoke checks; excluded from savings aggregates.
 
-The runner is intentionally opt-in because a full three-trial matrix makes many billable model calls:
+Every run starts from a fresh copy of `benchmarks/fixture`. The 18 tasks cover read exploration,
+tests, documentation, disjoint implementation, coupled refactoring, and high-risk decisions.
+
+## Run
+
+Planning is free:
 
 ```sh
 python3 benchmarks/run_matrix.py
-python3 benchmarks/run_matrix.py --execute --trials 3
 python3 benchmarks/run_routing_contract.py
-python3 benchmarks/run_routing_contract.py --execute
+```
+
+Run a two-call canary before the full matrix:
+
+```sh
+python3 benchmarks/run_matrix.py --execute --trials 1 --arms A B \
+  --task-ids coupled-01 --capture-session-usage
+```
+
+The sanitized result of the first local canary is retained in
+[`benchmarks/canary-2026-09-03.json`](../benchmarks/canary-2026-09-03.json). Both delegated runs
+proved Luna Max and passed validation, with 35.50%-40.35% fewer estimated Credits than the single
+stored A baseline. They took roughly twice as long. This is directional evidence only: one task,
+one A run, and two B runs do not satisfy the release gate below.
+
+Model execution is opt-in and billable:
+
+```sh
+python3 benchmarks/run_matrix.py --execute --trials 3 --capture-session-usage
+python3 benchmarks/run_routing_contract.py --execute --capture-session-usage
 python3 benchmarks/run_compatibility_smoke.py --execute
 python3 benchmarks/summarize.py benchmark-results/results.jsonl
 ```
 
-For B and C, each disposable fixture contains a copy of the packaged Skill and the prompt explicitly
-loads that file. This avoids treating a raw `$sol-luna` string in non-interactive CLI input as proof
-that the client's interactive skill selector hydrated the Skill. Plugin discovery is tested
-separately by the isolated installer test. The release checklist also requires a real frontend
-picker probe; the non-interactive benchmark cannot replace that UI gate.
+`--capture-session-usage` intentionally disables ephemeral mode so the runner can associate new
+parent and child rollout files. It extracts only usage, model, effort, hashed tool signatures, and
+path hints into the result; it does not copy rollout text. The normal Codex session files remain in
+the configured Codex home.
 
-Record deterministic test pass rate, elapsed time, Token metadata when exposed, tool failures, write conflicts, and model evidence. Non-code outputs still require blind manual review; deterministic tests alone are not a complete quality score.
+Pass `--codex-bin /path/to/codex` to every runner when validating with a standalone stable CLI
+instead of a Desktop-bundled pre-release.
 
-Release gate:
+Without that flag, the runner estimates complete Credits only for zero-child runs. Delegated totals
+are marked incomplete instead of silently omitting Luna usage.
 
-- Routing and safety invariants: 100%.
-- Overall pass-rate loss versus A: no more than five percentage points.
-- Median elapsed improvement on eligible parallel work: at least 20%.
-- Write-ownership conflicts, silent model fallback, and unsupported model claims: zero.
+## Credit calculation
 
-`run_routing_contract.py` contains 12 machine-checked cases for zero-child default behavior,
-MAIN_ONLY routing, exact reader/worker counts, overlap refusal, the hard limit, disable precedence,
-non-Sol main-thread compatibility, scope expansion, and main-thread verification. Its default mode
-only validates and counts the plan; `--execute` is required for billable runtime checks.
+`benchmarks/credit_rates.json` is a dated snapshot of the official Codex Credit table. For each
+thread:
 
-Do not publish multiplier claims without the raw result file, task set, account/config context, and scoring method.
+```text
+uncached input × input rate
++ cached input × cached rate
++ cache-write input × input rate × cache-write multiplier
++ output × output rate
+```
+
+The sum is divided by one million. `output_tokens` already includes billable reasoning output for
+this calculation; `reasoning_output_tokens` is retained as evidence and not added twice.
+
+Results include parent Credits, combined child Credits, total Credits, evidence completeness,
+effective child model/effort, exact duplicate tool-call count, and overlapping path count.
+
+## Release gate
+
+Arm B must satisfy all gates:
+
+- All 18 tasks have at least three trials; a canary can never pass the release gate.
+- Complete parent/child Credit evidence for every run.
+- A complete same-task, same-trial Sol-only baseline for every economy run.
+- Pass-rate loss versus A no greater than five percentage points.
+- Median Credit reduction across the full task set of at least 15%.
+- Median Credit reduction across economy-eligible tasks of at least 30%.
+- Zero exact duplicate parent/child tool executions.
+- Every reported route matches the task contract.
+- Every delegated run proves GPT-5.6 Luna and `max`.
+- Write-ownership conflicts and silent model fallback remain zero.
+
+Multiple Luna agents are not an adaptive default unless matched measurements show lower total
+Credits than one Luna at the same quality. Wall-clock improvement is reported but cannot override
+the Credit gate.
+
+Do not publish a savings or performance claim without the raw result file, task set, rate-card
+snapshot, account/config context, and scoring method.

@@ -1,6 +1,8 @@
-auto_min_agents = 2
-auto_max_agents = 4
+routing_objective = "minimize-credits"
+auto_min_agents = 1
+auto_max_agents = 2
 hard_max_agents = 8
 write_parallelism = "disjoint-only"
+parent_review = "targeted"
 strict_model = true
 announce_route = true

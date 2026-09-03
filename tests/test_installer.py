@@ -43,10 +43,12 @@ class InstallerTests(unittest.TestCase):
 
     def test_settings_validation(self) -> None:
         valid = {
-            "auto_min_agents": 2,
-            "auto_max_agents": 4,
+            "routing_objective": "minimize-credits",
+            "auto_min_agents": 1,
+            "auto_max_agents": 2,
             "hard_max_agents": 8,
             "write_parallelism": "disjoint-only",
+            "parent_review": "targeted",
             "strict_model": True,
             "announce_route": True,
         }
@@ -260,6 +262,156 @@ bounded worker
             ["codex", "plugin", "marketplace", "upgrade", installer.MARKETPLACE_NAME],
             codex_home=Path("/tmp/test-codex-home"),
         )
+
+    def test_configured_marketplace_reads_broken_source_without_loading_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = Path(directory)
+            (codex_home / "config.toml").write_text(
+                """
+[marketplaces.codex-sol-luna]
+source_type = "local"
+source = "/missing/old-repository"
+
+[plugins."sol-luna@codex-sol-luna"]
+enabled = true
+""",
+                encoding="utf-8",
+            )
+            marketplace = installer.configured_marketplace(
+                codex_home, installer.MARKETPLACE_NAME
+            )
+            plugins = installer.configured_marketplace_plugins(
+                codex_home, installer.MARKETPLACE_NAME
+            )
+        self.assertEqual(
+            marketplace,
+            {"source": "/missing/old-repository", "source_type": "local"},
+        )
+        self.assertEqual(plugins, {installer.PLUGIN_ID})
+
+    def test_owned_broken_marketplace_source_can_be_replaced(self) -> None:
+        state = {
+            "repository": "owner/old-repo",
+            "ref": "v0.1.0",
+            "marketplace_source": "/missing/old-repository",
+            "marketplace_name": installer.MARKETPLACE_NAME,
+            "marketplace_added": True,
+            "plugin_id": installer.PLUGIN_ID,
+        }
+        existing = {"source": "/missing/old-repository", "source_type": "local"}
+        added = {"marketplaceName": installer.MARKETPLACE_NAME}
+        with mock.patch.object(
+            installer, "configured_marketplace", side_effect=[existing]
+        ), mock.patch.object(
+            installer, "configured_marketplace_plugins", return_value={installer.PLUGIN_ID}
+        ), mock.patch.object(
+            installer, "command_json", side_effect=[{}, added]
+        ) as command, mock.patch.object(installer, "ensure_plugin") as ensure:
+            replaced = installer.replace_owned_marketplace_source(
+                "codex",
+                Path("/tmp/test-codex-home"),
+                state=state,
+                repository="owner/new-repo",
+                ref="v0.1.0",
+                repo_root=Path("/tmp/new-repository"),
+                reporter=installer.Reporter(),
+            )
+        self.assertTrue(replaced)
+        self.assertEqual(command.call_count, 2)
+        self.assertEqual(
+            command.call_args_list[0].args[0],
+            ["codex", "plugin", "marketplace", "remove", installer.MARKETPLACE_NAME, "--json"],
+        )
+        self.assertIn("/tmp/new-repository", command.call_args_list[1].args[0])
+        ensure.assert_called_once()
+
+    def test_marketplace_source_replacement_refuses_unowned_entry(self) -> None:
+        existing = {"source": "/someone/else/repository", "source_type": "local"}
+        with mock.patch.object(
+            installer, "configured_marketplace", return_value=existing
+        ), mock.patch.object(installer, "command_json") as command:
+            with self.assertRaisesRegex(installer.InstallerError, "does not own"):
+                installer.replace_owned_marketplace_source(
+                    "codex",
+                    Path("/tmp/test-codex-home"),
+                    state={},
+                    repository="owner/new-repo",
+                    ref="v0.1.0",
+                    repo_root=Path("/tmp/new-repository"),
+                    reporter=installer.Reporter(),
+                )
+        command.assert_not_called()
+
+    def test_marketplace_source_replacement_refuses_other_plugins(self) -> None:
+        state = {
+            "marketplace_source": "/old/repository",
+            "marketplace_name": installer.MARKETPLACE_NAME,
+            "marketplace_added": True,
+            "plugin_id": installer.PLUGIN_ID,
+        }
+        existing = {"source": "/old/repository", "source_type": "local"}
+        with mock.patch.object(
+            installer, "configured_marketplace", return_value=existing
+        ), mock.patch.object(
+            installer,
+            "configured_marketplace_plugins",
+            return_value={installer.PLUGIN_ID, "other@codex-sol-luna"},
+        ), mock.patch.object(installer, "command_json") as command:
+            with self.assertRaisesRegex(installer.InstallerError, "unrelated configured plugins"):
+                installer.replace_owned_marketplace_source(
+                    "codex",
+                    Path("/tmp/test-codex-home"),
+                    state=state,
+                    repository="owner/new-repo",
+                    ref="v0.1.0",
+                    repo_root=Path("/tmp/new-repository"),
+                    reporter=installer.Reporter(),
+                )
+        command.assert_not_called()
+
+    def test_marketplace_source_replacement_rolls_back_when_old_source_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old_source = root / "old-repository"
+            new_source = root / "new-repository"
+            old_source.mkdir()
+            new_source.mkdir()
+            state = {
+                "repository": "owner/old-repo",
+                "ref": "v0.1.0",
+                "marketplace_source": str(old_source),
+                "marketplace_name": installer.MARKETPLACE_NAME,
+                "marketplace_added": True,
+                "plugin_id": installer.PLUGIN_ID,
+            }
+            existing = {"source": str(old_source), "source_type": "local"}
+            restored = {"marketplaceName": installer.MARKETPLACE_NAME}
+            with mock.patch.object(
+                installer,
+                "configured_marketplace",
+                side_effect=[existing, None],
+            ), mock.patch.object(
+                installer,
+                "configured_marketplace_plugins",
+                return_value={installer.PLUGIN_ID},
+            ), mock.patch.object(
+                installer,
+                "command_json",
+                side_effect=[{}, installer.InstallerError("new source failed"), restored],
+            ) as command, mock.patch.object(installer, "ensure_plugin") as ensure:
+                with self.assertRaisesRegex(installer.InstallerError, "previous source was restored"):
+                    installer.replace_owned_marketplace_source(
+                        "codex",
+                        root / "codex-home",
+                        state=state,
+                        repository="owner/new-repo",
+                        ref="v0.1.0",
+                        repo_root=new_source,
+                        reporter=installer.Reporter(),
+                    )
+            self.assertEqual(command.call_count, 3)
+            self.assertIn(str(old_source), command.call_args_list[-1].args[0])
+            ensure.assert_called_once()
 
     def test_owned_marketplace_ref_rotation_is_bounded(self) -> None:
         state = {

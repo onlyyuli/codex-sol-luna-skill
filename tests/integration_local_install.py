@@ -55,8 +55,18 @@ def main() -> int:
         print("SKIP: codex CLI is not installed")
         return 0
     with tempfile.TemporaryDirectory(prefix="sol-luna-integration-") as directory:
-        codex_home = Path(directory) / "codex-home"
+        temp_root = Path(directory)
+        codex_home = temp_root / "codex-home"
         codex_home.mkdir()
+        old_repo = temp_root / "old-repository"
+        new_repo = temp_root / "new-repository"
+        shutil.copytree(
+            ROOT,
+            old_repo,
+            ignore=shutil.ignore_patterns(
+                ".git", "dist", "benchmark-results", "__pycache__", ".pytest_cache"
+            ),
+        )
         config = codex_home / "config.toml"
         original = 'model = "gpt-5.6-sol"\ncustom_marker = "keep-me"\n'
         config.write_text(original, encoding="utf-8")
@@ -64,7 +74,7 @@ def main() -> int:
             "--codex-home",
             str(codex_home),
             "--repo-root",
-            str(ROOT),
+            str(old_repo),
             "--repository",
             "onlyyuli/codex-sol-luna-skill",
             "--local-marketplace",
@@ -83,6 +93,8 @@ def main() -> int:
         )
         if json.loads(repeated_install.stdout)["status"] != "ok":
             raise RuntimeError("repeated installation was not idempotent")
+        old_repo.rename(new_repo)
+        options[options.index(str(old_repo))] = str(new_repo)
         upgraded = run(
             installer_command(args.entrypoint, "upgrade", [*options, "--with-cli-profile"])
         )
